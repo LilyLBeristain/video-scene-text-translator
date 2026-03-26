@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 
 from src.utils.image_processing import (
-    compute_contrast,
     compute_contrast_otsu,
     compute_sharpness,
     match_histogram_luminance,
@@ -33,28 +32,6 @@ class TestComputeSharpness:
         score = compute_sharpness(img)
         assert score < 0.1
 
-
-class TestComputeContrast:
-    def test_high_contrast(self):
-        """Black and white checkerboard should have high contrast."""
-        img = np.zeros((100, 100), dtype=np.uint8)
-        img[:50, :] = 255
-        score = compute_contrast(img)
-        assert score > 0.5
-
-    def test_uniform_low_contrast(self):
-        img = np.full((50, 50, 3), 128, dtype=np.uint8)
-        score = compute_contrast(img)
-        assert score < 0.1
-
-    def test_black_image(self):
-        img = np.zeros((50, 50, 3), dtype=np.uint8)
-        score = compute_contrast(img)
-        assert score == 0.0
-
-    def test_score_in_range(self, synthetic_frame):
-        score = compute_contrast(synthetic_frame)
-        assert 0 <= score <= 1
 
 
 class TestComputeContrastOtsu:

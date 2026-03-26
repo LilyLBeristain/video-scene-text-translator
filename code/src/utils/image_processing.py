@@ -17,19 +17,6 @@ def compute_sharpness(image: np.ndarray) -> float:
     return float(np.tanh(variance / 1000.0))
 
 
-def compute_contrast(image: np.ndarray) -> float:
-    """Compute local contrast as coefficient of variation (std/mean).
-
-    Text regions with high contrast (dark on light or vice versa) score higher.
-    Returns value in [0, 1].
-    """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-    mean = gray.mean()
-    if mean < 1e-6:
-        return 0.0
-    std = gray.std()
-    return float(np.clip(std / mean, 0, 1))
-
 
 def compute_contrast_otsu(image: np.ndarray) -> float:
     """Compute contrast via Otsu's interclass variance, normalized to [0, 1].
