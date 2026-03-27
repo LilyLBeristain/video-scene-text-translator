@@ -28,6 +28,34 @@ S5: Revert
 Output Video
 ```
 
+## Key Data Types
+
+These dataclasses flow through the pipeline. Each stage reads and enriches them.
+
+### BBox
+Axis-aligned bounding box. Fields: `x`, `y`, `width`, `height`. Provides `to_slice()` for numpy array indexing and `area()`. Derived from `Quad` via `quad.to_bbox()` — used for fast IoU matching and array cropping where perspective accuracy isn't needed.
+
+### Quad
+Four corner points defining a text region polygon. `points: np.ndarray` of shape `(4, 2)` in `[TL, TR, BR, BL]` order. This is the "real" geometry — EasyOCR produces quads, and homographies are computed from quad corners. Can be perspective-distorted, rotated, or skewed.
+
+### TextDetection
+Everything known about a text region in a single frame. Geometry (`quad`, `bbox`), OCR data (`text`, `ocr_confidence`), quality metrics (`sharpness_score`, `contrast_score`, `frontality_score`, `composite_score`), and homography fields (`H_to_frontal`, `H_from_frontal`, `homography_valid`). Geometry and OCR are set by S1; homography fields are set by S2.
+
+### TextTrack
+The central data structure — a tracked text region across multiple frames. Groups `TextDetection` objects that refer to the same physical text instance. Key fields:
+- `detections: dict[int, TextDetection]` — frame_idx -> detection, dense after S1 gap-filling
+- `reference_frame_idx: int` — best frame for editing (highest quality)
+- `reference_quad: Quad` — read-only property, returns `detections[reference_frame_idx].quad`
+- `canonical_size: tuple[int, int]` — (width, height) of the canonical frontal rectangle, set by S2
+- `edited_roi: np.ndarray` — edited text image in canonical frontal space, set by S3
+- `source_text` / `target_text` — original and translated text strings
+
+### PropagatedROI
+A lighting-adapted edited ROI ready for compositing into a specific frame. Contains `roi_image` (canonical frontal, color-corrected), `alpha_mask` (feathered blending mask), and `target_quad` (where to place it in the original frame). Created by S4, consumed by S5.
+
+### PipelineResult
+Final output: `tracks`, `output_frames`, `fps`, `frame_size`.
+
 ## Stage Details
 
 ### S1: Detection + Tracking + Selection
