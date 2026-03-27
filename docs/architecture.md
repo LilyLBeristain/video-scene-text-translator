@@ -29,23 +29,22 @@ Separate work, not in `code/`. Models consumed via `BaseTextEditor` interface.
 - **AnyText2**: Diffusion-based (SD 1.5 + WriteNet + AttnX). Supports multilingual. Inference code imported, debugging dependencies.
 - **CLASTE**: GAN-based cross-language specific. Would require full re-implementation — high effort, uncertain outcome.
 
-### Stage B — Basic Video Pipeline (IMPLEMENTED)
-Uses classical CV methods. 5-stage pipeline:
-1. **S1 Detection**: EasyOCR → detect text → IoU-based tracking → Google Translate → score frames (4-metric composite: OCR confidence, sharpness, contrast, frontality) → 2-stage pre-filter (OCR threshold + top-K sharpness) → 2-metric reference selection (0.7 contrast + 0.3 frontality)
-2. **S2 Frontalization**: Optical flow (Farneback default, LK alternative) → bidirectional quad propagation from reference → `cv2.findHomography(RANSAC)` per frame → H_to_ref / H_from_ref
-3. **S3 Text Editing**: Extract reference ROI → call `BaseTextEditor.edit_text(roi, target_text)` → store edited_roi on TextTrack
-4. **S4 Propagation**: YCrCb luminance histogram matching (CDF-based) → adapt edited ROI to each frame's lighting → create feathered alpha mask
-5. **S5 Revert**: Inverse homography warp via H_from_ref → alpha blending → composite into original frames
+### Stage B — Classical Video Pipeline (IMPLEMENTED)
+Uses classical CV methods, aligned with STRIVE's frontalization-first design. 5-stage pipeline:
+1. **S1 Detection + Tracking + Selection**: Split into submodules (`s1_detection/detector.py`, `tracker.py`, `selector.py`, `stage.py`). EasyOCR → detect text on sampled frames → IoU tracking → optical flow gap-filling (bidirectional from reference, covers all frames) → Google Translate → reference frame selection (4-metric scoring → 2-stage pre-filter → 2-metric composite). Updates source_text from reference frame's OCR.
+2. **S2 Frontalization**: Computes homography from each frame's quad to a canonical frontal rectangle (axis-aligned, derived from reference quad dimensions). Stores `H_to_frontal` / `H_from_frontal` directly on TextDetection. Pure geometry — no pixels warped.
+3. **S3 Text Editing**: Warps reference frame to canonical frontal via `H_to_frontal` → passes clean frontal ROI to `BaseTextEditor.edit_text()` → stores edited_roi. Falls back to bbox crop if no homography.
+4. **S4 Propagation**: Warps each frame to canonical frontal via `H_to_frontal` → histogram matches luminance (CDF-based, YCrCb Y channel) against the frontalized edited ROI — pixel-aligned comparison. Creates feathered alpha mask. Falls back to bbox crop if no homography.
+5. **S5 Revert**: Reads `H_from_frontal` from TextDetection → warps edited ROI to bounded target bbox region (not full frame) via `T @ H_from_frontal` → alpha blends only within bbox slice.
 
 ### Stage C — Full STRIVE Pipeline (NOT YET IMPLEMENTED)
-- Replace S2 optical flow + homography with STTN (Spatial-Temporal Transformer Network)
-- Replace S4 histogram matching with TPM (Temporal Propagation Module)
+- Replace S2 homography with STTN (Spatial-Temporal Transformer Network) — learned frontalization with temporal consistency
+- Replace S4 histogram matching with TPM (LCM per-pixel lighting ratio + BPN differential blur prediction)
 
-**Frontalization difference (Stage B vs STRIVE):**
-- Stage B does NOT do true frontalization. The reference frame's natural perspective is treated as "frontal". S2 only computes the geometric mapping (H_to_ref / H_from_ref) between frames. The edited ROI is propagated outward from reference via H_from_ref in S5.
-- STRIVE uses STTN to warp every frame's ROI to a canonical frontal rectangle, edits text in that normalized space, then transfers back. STTN sees multiple frames jointly for temporal consistency.
-- Classical frontalization (getPerspectiveTransform quad→rect) is feasible for planar text but doesn't handle non-planar surfaces, motion blur, or temporal smoothness like STTN does.
-- If implementing Stage C: replace S2's optical flow + homography with STTN, and the pipeline needs an explicit frontalize→edit→de-frontalize flow instead of the current ref-centric propagation.
+**Stage B vs STRIVE frontalization:**
+- Stage B now frontalizes to a canonical rectangle (same flow as STRIVE: frontalize → edit → propagate → de-frontalize), but uses classical homography instead of learned STTN
+- Classical homography is the exact solution for planar text but doesn't handle non-planar surfaces or temporal consistency
+- STTN processes frame stacks jointly for temporal smoothness; Stage B computes each frame's homography independently
 
 ## Cross-Cutting Concerns
 - **Config**: All parameters in `config/default.yaml`. Nested dataclasses with validation. CLI overrides via argparse in `run_pipeline.py`.
@@ -59,12 +58,17 @@ Uses classical CV methods. 5-stage pipeline:
 - **Config-driven**: All tunable parameters in YAML. Validation enforces weight sums, range bounds, and file existence.
 - **Detections keyed by frame_idx**: Dict (not list) for O(1) lookup. Handles sparse detections naturally.
 - **Lazy initialization**: EasyOCR, translator, and text editor init on first use — avoids import failures when deps not installed.
-- **Bidirectional propagation**: S2 propagates quads forward and backward from reference frame — more stable than one-direction.
+- **Bidirectional propagation**: S1 propagates quads forward and backward from reference frame via optical flow — more stable than one-direction.
+- **Canonical frontalization**: All stages operate in a shared canonical frontal space (axis-aligned rectangle). H_to_frontal / H_from_frontal stored on TextDetection — single source of truth, no parallel data structures.
+- **Matrices only, warp on-the-fly**: S2 stores 3×3 matrices, downstream stages warp when they need pixels. Keeps S2 as pure geometry, avoids memory bloat.
 
 ## Known Limitations
 - **Tracking**: IoU-based greedy matching breaks with large camera motion. Hungarian algorithm would improve but Stage C's STTN would replace entirely.
 - **Optical flow drift**: Accumulates over long sequences. Bidirectional propagation helps but not perfect.
-- **Lighting adaptation**: Global histogram matching per ROI — doesn't handle spatially varying lighting (shadows, specular highlights).
+- **Gap-filling propagates to all frames**: Optical flow fills quads for ALL video frames, including frames where text is genuinely absent (occluded, out of view, camera cut). This causes false replacements. Fix options: (1) validate tracked quads — reject if area changes >50% between frames or quad becomes degenerate/self-intersecting, (2) appearance verification — check contrast/sharpness in tracked region to confirm text is still present.
+- **Lighting adaptation**: Global histogram matching on aligned ROIs — better than misaligned, but still doesn't handle spatially varying lighting (shadows, specular highlights). Per-pixel lighting ratio (classical LCM) would require inpainting to isolate background before computing the ratio, otherwise artifacts at text edges.
+- **No blur modeling**: Pipeline ignores motion blur and focus blur entirely. STRIVE's BPN predicts differential blur between frames — no classical equivalent without a learned model.
+- **Temporal jitter**: Each frame's homography is computed independently — no smoothing across time. Temporal smoothing would require decomposing homography into translation/rotation/scale before averaging (can't average raw 3×3 matrices).
 - **Placeholder editor**: cv2.putText produces crude output with no style matching. Awaiting real Stage A model integration.
 - **Translation backend**: googletrans is unofficial/unreliable. Config supports google-cloud-translate but requires API key setup.
 - **Memory**: All frames in memory. Not viable for videos >500 frames without sliding-window refactor.
@@ -77,7 +81,6 @@ Uses classical CV methods. 5-stage pipeline:
 - **ruff**: Linting and formatting — fast, all-in-one Python linter
 
 ## Open Questions
-- Stage C: STTN model integration approach (replaces S2 optical flow + homography)
-- Stage C: TPM model integration approach (replaces S4 histogram matching)
-- Whether to split `s1_detection.py` (256 lines, 4 responsibilities: detection, translation, tracking, selection)
+- Stage C: STTN model integration approach (replaces S2 homography with learned spatial transformer)
+- Stage C: TPM model integration approach (replaces S4 histogram matching with LCM + BPN)
 - Sliding-window frame loading strategy for long videos
