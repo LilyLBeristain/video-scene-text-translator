@@ -83,7 +83,6 @@ def sample_track(sample_detection, rect_quad):
         target_lang="es",
         detections={0: sample_detection},
         reference_frame_idx=0,
-        reference_quad=rect_quad,
     )
 
 

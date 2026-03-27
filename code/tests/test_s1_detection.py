@@ -8,30 +8,31 @@ import numpy as np
 import pytest
 
 from src.data_types import BBox, Quad, TextDetection, TextTrack
-from src.stages.s1_detection import DetectionStage, _bbox_iou
+from src.stages.s1_detection import DetectionStage
+from src.stages.s1_detection.tracker import TextTracker, bbox_iou
 
 
 class TestBBoxIoU:
     def test_identical_boxes(self):
         bbox = BBox(x=0, y=0, width=100, height=100)
-        assert _bbox_iou(bbox, bbox) == pytest.approx(1.0, abs=0.01)
+        assert bbox_iou(bbox, bbox) == pytest.approx(1.0, abs=0.01)
 
     def test_no_overlap(self):
         a = BBox(x=0, y=0, width=50, height=50)
         b = BBox(x=100, y=100, width=50, height=50)
-        assert _bbox_iou(a, b) == pytest.approx(0.0, abs=0.01)
+        assert bbox_iou(a, b) == pytest.approx(0.0, abs=0.01)
 
     def test_partial_overlap(self):
         a = BBox(x=0, y=0, width=100, height=100)
         b = BBox(x=50, y=50, width=100, height=100)
         # Intersection: 50x50=2500, Union: 10000+10000-2500=17500
-        assert _bbox_iou(a, b) == pytest.approx(2500 / 17500, abs=0.01)
+        assert bbox_iou(a, b) == pytest.approx(2500 / 17500, abs=0.01)
 
     def test_contained(self):
         outer = BBox(x=0, y=0, width=100, height=100)
         inner = BBox(x=25, y=25, width=50, height=50)
         # Intersection = inner area = 2500, Union = 10000
-        assert _bbox_iou(outer, inner) == pytest.approx(2500 / 10000, abs=0.01)
+        assert bbox_iou(outer, inner) == pytest.approx(2500 / 10000, abs=0.01)
 
 
 class TestCompositeScore:
@@ -47,7 +48,7 @@ class TestCompositeScore:
             contrast_score=1.0,
             frontality_score=1.0,
         )
-        score = stage._compute_composite_score(det)
+        score = stage.detector.compute_composite_score(det)
         assert score == pytest.approx(1.0, abs=0.01)
 
     def test_zero_scores(self, default_config):
@@ -59,7 +60,7 @@ class TestCompositeScore:
             text="test",
             ocr_confidence=0.0,
         )
-        score = stage._compute_composite_score(det)
+        score = stage.detector.compute_composite_score(det)
         assert score == 0.0
 
 
@@ -75,33 +76,36 @@ class TestGroupDetections:
 
     def test_same_position_grouped(self, default_config):
         """Detections at same position across frames should be one track."""
-        stage = DetectionStage(default_config)
-        # Override translate to avoid external call
-        stage.translate_text = lambda text: "HOLA"
+        tracker = TextTracker(default_config.detection)
 
         all_dets = {
             0: [self._make_det(0, 200)],
             1: [self._make_det(1, 205)],  # Slight shift, should still match
             2: [self._make_det(2, 210)],
         }
-        tracks = stage.group_detections_into_tracks(all_dets)
+        tracks = tracker.group_detections_into_tracks(
+            all_dets, lambda text: "HOLA"
+        )
         assert len(tracks) == 1
         assert len(tracks[0].detections) == 3
 
     def test_different_positions_separate_tracks(self, default_config):
         """Detections at different positions should be separate tracks."""
-        stage = DetectionStage(default_config)
-        stage.translate_text = lambda text: "TRANSLATED"
+        tracker = TextTracker(default_config.detection)
 
         all_dets = {
             0: [self._make_det(0, 50), self._make_det(0, 400)],
         }
-        tracks = stage.group_detections_into_tracks(all_dets)
+        tracks = tracker.group_detections_into_tracks(
+            all_dets, lambda text: "TRANSLATED"
+        )
         assert len(tracks) == 2
 
     def test_empty_detections(self, default_config):
-        stage = DetectionStage(default_config)
-        tracks = stage.group_detections_into_tracks({})
+        tracker = TextTracker(default_config.detection)
+        tracks = tracker.group_detections_into_tracks(
+            {}, lambda text: "TRANSLATED"
+        )
         assert tracks == []
 
 
@@ -132,7 +136,7 @@ class TestSelectReferenceFrames:
             source_lang="en", target_lang="es",
             detections={0: det_low, 5: det_high},
         )
-        result = stage.select_reference_frames([track])
+        result = stage.selector.select_reference_frames([track])
         assert result[0].reference_frame_idx == 5
 
     def test_ocr_filter_excludes_low_confidence(self, default_config):
@@ -147,7 +151,7 @@ class TestSelectReferenceFrames:
             source_lang="en", target_lang="es",
             detections={0: det_bad_ocr, 5: det_ok_ocr},
         )
-        result = stage.select_reference_frames([track])
+        result = stage.selector.select_reference_frames([track])
         assert result[0].reference_frame_idx == 5
 
     def test_sharpness_top_k_filter(self, default_config):
@@ -163,7 +167,7 @@ class TestSelectReferenceFrames:
             source_lang="en", target_lang="es",
             detections={0: det_a, 1: det_b, 2: det_c},
         )
-        result = stage.select_reference_frames([track])
+        result = stage.selector.select_reference_frames([track])
         # det_b has highest contrast/frontality but lowest sharpness → filtered
         # Between det_a (0.7*0.2 + 0.3*0.2 = 0.20) and det_c (0.7*0.5 + 0.3*0.5 = 0.50)
         assert result[0].reference_frame_idx == 2
@@ -180,7 +184,7 @@ class TestSelectReferenceFrames:
             source_lang="en", target_lang="es",
             detections={0: det_a, 1: det_b},
         )
-        result = stage.select_reference_frames([track])
+        result = stage.selector.select_reference_frames([track])
         # Falls back to all, det_b has higher contrast+frontality
         assert result[0].reference_frame_idx == 1
 
@@ -192,5 +196,72 @@ class TestSelectReferenceFrames:
             source_lang="en", target_lang="es",
             detections={},
         )
-        result = stage.select_reference_frames([track])
+        result = stage.selector.select_reference_frames([track])
         assert result[0].reference_frame_idx == -1
+
+
+class TestFillGaps:
+    def test_fills_missing_frames(
+        self, default_config, synthetic_frame, synthetic_frame_shifted, rect_quad
+    ):
+        """Optical flow should fill gaps between detected frames."""
+        tracker = TextTracker(default_config.detection)
+        track = TextTrack(
+            track_id=0,
+            source_text="HELLO",
+            target_text="HOLA",
+            source_lang="en",
+            target_lang="es",
+            detections={
+                0: TextDetection(
+                    frame_idx=0,
+                    quad=rect_quad,
+                    bbox=rect_quad.to_bbox(),
+                    text="HELLO",
+                    ocr_confidence=0.9,
+                ),
+            },
+            reference_frame_idx=0,
+        )
+        frames = {
+            0: synthetic_frame,
+            1: synthetic_frame_shifted,
+            2: synthetic_frame,
+        }
+        result = tracker.fill_gaps([track], frames)
+        # Should now have detections for frames 0, 1, and 2
+        assert 0 in result[0].detections
+        assert 1 in result[0].detections
+        assert 2 in result[0].detections
+        # Gap-filled frames should have ocr_confidence=0.0
+        assert result[0].detections[1].ocr_confidence == 0.0
+
+    def test_no_gaps_unchanged(self, default_config, rect_quad):
+        """If all frames have detections, nothing should change."""
+        tracker = TextTracker(default_config.detection)
+        det0 = TextDetection(
+            frame_idx=0,
+            quad=rect_quad,
+            bbox=rect_quad.to_bbox(),
+            text="HELLO",
+            ocr_confidence=0.9,
+        )
+        det1 = TextDetection(
+            frame_idx=1,
+            quad=rect_quad,
+            bbox=rect_quad.to_bbox(),
+            text="HELLO",
+            ocr_confidence=0.9,
+        )
+        track = TextTrack(
+            track_id=0,
+            source_text="HELLO",
+            target_text="HOLA",
+            source_lang="en",
+            target_lang="es",
+            detections={0: det0, 1: det1},
+            reference_frame_idx=0,
+        )
+        frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+        result = tracker.fill_gaps([track], {0: frame, 1: frame})
+        assert len(result[0].detections) == 2
