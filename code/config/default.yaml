@@ -23,10 +23,13 @@ detection:
   ref_weight_frontality: 0.3  # bbox area ratio
   frame_sample_rate: 1
   # Optical flow for tracking quads between frames
-  optical_flow_method: "farneback"
+  optical_flow_method: "cotracker"  # "farneback", "lucas_kanade", or "cotracker"
   # "gaps_only": only fill frames missing OCR detections
   # "full_propagation": propagate reference quad to ALL frames, overwriting OCR quads
   flow_fill_strategy: "full_propagation"
+  # CoTracker3 settings (only used when optical_flow_method == "cotracker")
+  cotracker_checkpoint: "/workspace/co-tracker/checkpoints/scaled_offline.pth"
+  cotracker_window_len: 60
   farneback_pyr_scale: 0.5
   farneback_levels: 3
   farneback_winsize: 15

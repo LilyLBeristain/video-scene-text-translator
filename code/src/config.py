@@ -30,10 +30,13 @@ class DetectionConfig:
     # Process every N-th frame for detection (1 = every frame)
     frame_sample_rate: int = 1
     # Optical flow for tracking quads between frames
-    optical_flow_method: str = "farneback"  # "farneback" or "lucas_kanade"
+    optical_flow_method: str = "farneback"  # "farneback", "lucas_kanade", or "cotracker"
     # "gaps_only": only fill frames missing OCR detections (original behavior)
     # "full_propagation": propagate reference quad to ALL frames, overwriting OCR quads
     flow_fill_strategy: str = "gaps_only"
+    # CoTracker3 settings (only used when optical_flow_method == "cotracker")
+    cotracker_checkpoint: str = "/workspace/co-tracker/checkpoints/scaled_offline.pth"
+    cotracker_window_len: int = 60
     farneback_pyr_scale: float = 0.5
     farneback_levels: int = 3
     farneback_winsize: int = 15

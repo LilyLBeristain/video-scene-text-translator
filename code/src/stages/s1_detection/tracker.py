@@ -11,6 +11,7 @@ import numpy as np
 from src.config import DetectionConfig
 from src.data_types import BBox, Quad, TextDetection, TextTrack
 from src.utils.optical_flow import (
+    CoTrackerFlowTracker,
     track_points_farneback,
     track_points_lucas_kanade,
 )
@@ -32,6 +33,7 @@ class TextTracker:
 
     def __init__(self, config: DetectionConfig):
         self.config = config
+        self._cotracker: CoTrackerFlowTracker | None = None
 
     def group_detections_into_tracks(
         self,
@@ -155,6 +157,21 @@ class TextTracker:
                 (ignoring other detected quads). This produces a smooth,
                 purely flow-based trajectory from a single anchor.
         """
+        # CoTracker: batch-track all points from the reference frame at once
+        if self.config.optical_flow_method == "cotracker":
+            ref_det = track.detections.get(ref_idx)
+            if ref_det is None:
+                return {}
+            if self._cotracker is None:
+                self._cotracker = CoTrackerFlowTracker(self.config)
+            tracked_points = self._cotracker.track_points_batch(
+                frames, all_frame_idxs, ref_idx, ref_det.quad.points,
+            )
+            return {
+                idx: Quad(points=pts) for idx, pts in tracked_points.items()
+            }
+
+        # Pairwise methods (farneback / lucas_kanade)
         tracked_quads: dict[int, Quad] = {}
         if ref_only:
             ref_det = track.detections.get(ref_idx)
