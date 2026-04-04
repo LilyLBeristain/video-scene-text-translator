@@ -7,6 +7,8 @@ import logging
 import cv2
 import numpy as np
 
+import tqdm
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,7 @@ class CoTrackerOnlineFlowTracker:
         frame_idxs: list[int],
         ref_idx: int,
         ref_points: np.ndarray,
+        pbar_info: str = "",
     ) -> dict[int, np.ndarray]:
         """Track points from a reference frame across ``frame_idxs`` using online mode.
 
@@ -95,7 +98,7 @@ class CoTrackerOnlineFlowTracker:
         is_first_step = True
         frames_fed = 0
 
-        for idx in frame_idxs:
+        for idx in tqdm.tqdm(frame_idxs, desc=f"CoTracker online {pbar_info}", unit="frame", leave=False):
             frame = video_reader.read_frame(idx)
             if frame is None:
                 logger.warning("Failed to read frame %d, reusing previous", idx)

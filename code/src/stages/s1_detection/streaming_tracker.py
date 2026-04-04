@@ -101,8 +101,9 @@ class StreamingTextTracker:
         if ref_det is None:
             return {}
 
+        pbar_info = f"track {track.track_id} ({track.source_text})"
         tracked_points = self._cotracker_online.track_points_online(
-            video_reader, track_frame_idxs, ref_idx, ref_det.quad.points,
+            video_reader, track_frame_idxs, ref_idx, ref_det.quad.points, pbar_info=pbar_info
         )
         return {idx: Quad(points=pts) for idx, pts in tracked_points.items()}
 

@@ -11,6 +11,7 @@ import logging
 import time
 
 import numpy as np
+import tqdm
 
 from src.config import PipelineConfig
 from src.data_types import TextDetection, TextTrack
@@ -54,10 +55,15 @@ class StreamingDetectionStage:
         all_detections: dict[int, list[TextDetection]] = {}
 
         t0_ocr = time.perf_counter()
-        frame_count = 0
-        for frame_idx, frame in video_reader.iter_frames():
-            frame_count += 1
-            if frame_idx % sample_rate != 0:
+        total_frames = video_reader.frame_count
+        sampled_idxs = list(range(0, total_frames, sample_rate))
+        for frame_idx in tqdm.tqdm(
+            sampled_idxs,
+            desc="OCR detection",
+            unit="frame",
+        ):
+            frame = video_reader.read_frame(frame_idx)
+            if frame is None:
                 continue
             dets = self.detector.detect_text_in_frame(frame, frame_idx)
             if dets:
@@ -68,8 +74,8 @@ class StreamingDetectionStage:
             )
         t_ocr = time.perf_counter() - t0_ocr
         logger.info(
-            "StreamingS1: OCR detection took %.2fs (%d frames scanned, %d with detections)",
-            t_ocr, frame_count, len(all_detections),
+            "StreamingS1: OCR detection took %.2fs (%d frames sampled, %d with detections)",
+            t_ocr, len(sampled_idxs), len(all_detections),
         )
 
         # Group into tracks (no frames needed — operates on detection metadata)
