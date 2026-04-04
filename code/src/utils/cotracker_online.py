@@ -116,13 +116,16 @@ class CoTrackerOnlineFlowTracker:
             queries=queries,
         )
 
-        # Process remaining chunks
+        # Process remaining chunks — pad the last chunk if shorter than step * 2
         all_tracks = None
         all_vis = None
         for ind in range(0, T - step, step):
             chunk = video_tensor[:, ind: ind + step * 2]
             if chunk.shape[1] < step * 2:
-                break
+                # Pad with the last frame repeated to reach step * 2
+                pad_size = step * 2 - chunk.shape[1]
+                padding = video_tensor[:, -1:].expand(-1, pad_size, -1, -1, -1)
+                chunk = torch.cat([chunk, padding], dim=1)
             pred_tracks, pred_vis = self._model(video_chunk=chunk)
             if pred_tracks is not None:
                 all_tracks = pred_tracks
@@ -139,14 +142,12 @@ class CoTrackerOnlineFlowTracker:
         vis_np = all_vis[0].cpu().numpy()          # (T_out, N)
 
         result: dict[int, np.ndarray] = {}
-        # The output length may differ from input — map back to frame indices
         t_out = tracks_np.shape[0]
         for t in range(min(t_out, len(frame_idxs))):
-            if vis_np[t].all():
-                result[frame_idxs[t]] = tracks_np[t].astype(np.float32)
-            else:
+            result[frame_idxs[t]] = tracks_np[t].astype(np.float32)
+            if not vis_np[t].all():
                 logger.debug(
-                    "CoTracker online: frame %d has occluded points, skipping",
+                    "CoTracker online: frame %d has partially occluded points (keeping anyway)",
                     frame_idxs[t],
                 )
 
