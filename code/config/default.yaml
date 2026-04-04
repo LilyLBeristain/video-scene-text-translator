@@ -7,8 +7,9 @@ log_level: "INFO"
 debug_output_dir: null
 
 detection:
+  ocr_backend: "paddleocr"  # "easyocr" or "paddleocr"
   ocr_languages: ["en"]
-  ocr_confidence_threshold: 0.3
+  ocr_confidence_threshold: 0.9
   min_text_area: 100
   # Per-detection composite scoring weights (must sum to 1.0)
   weight_ocr_confidence: 0.3

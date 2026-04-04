@@ -13,6 +13,7 @@ import yaml
 
 @dataclass
 class DetectionConfig:
+    ocr_backend: str = "easyocr"  # "easyocr" or "paddleocr"
     ocr_languages: list[str] = field(default_factory=lambda: ["en"])
     ocr_confidence_threshold: float = 0.3
     min_text_area: int = 100

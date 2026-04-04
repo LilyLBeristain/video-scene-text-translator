@@ -36,7 +36,7 @@ These dataclasses flow through the pipeline. Each stage reads and enriches them.
 Axis-aligned bounding box. Fields: `x`, `y`, `width`, `height`. Provides `to_slice()` for numpy array indexing and `area()`. Derived from `Quad` via `quad.to_bbox()` — used for fast IoU matching and array cropping where perspective accuracy isn't needed.
 
 ### Quad
-Four corner points defining a text region polygon. `points: np.ndarray` of shape `(4, 2)` in `[TL, TR, BR, BL]` order. This is the "real" geometry — EasyOCR produces quads, and homographies are computed from quad corners. Can be perspective-distorted, rotated, or skewed.
+Four corner points defining a text region polygon. `points: np.ndarray` of shape `(4, 2)` in `[TL, TR, BR, BL]` order. This is the "real" geometry — the OCR backend (EasyOCR or PaddleOCR) produces quads, and homographies are computed from quad corners. Can be perspective-distorted, rotated, or skewed.
 
 ### TextDetection
 Everything known about a text region in a single frame. Geometry (`quad`, `bbox`), OCR data (`text`, `ocr_confidence`), quality metrics (`sharpness_score`, `contrast_score`, `frontality_score`, `composite_score`), and homography fields (`H_to_frontal`, `H_from_frontal`, `homography_valid`). Geometry and OCR are set by S1; homography fields are set by S2.
@@ -64,7 +64,7 @@ Detects text in video frames, tracks detections across frames, selects the best 
 
 **Steps:**
 
-1. **Detect** — Runs EasyOCR on every Nth frame (`frame_sample_rate`). Filters detections by OCR confidence and minimum text area. Computes quality metrics per detection: sharpness (Laplacian variance), contrast (Otsu interclass variance), frontality (quad-to-bbox area ratio), and a weighted composite score.
+1. **Detect** — Runs the configured OCR backend (EasyOCR or PaddleOCR, set via `detection.ocr_backend`) on every Nth frame (`frame_sample_rate`). Filters detections by OCR confidence and minimum text area. Computes quality metrics per detection: sharpness (Laplacian variance), contrast (Otsu interclass variance), frontality (quad-to-bbox area ratio), and a weighted composite score.
 
 2. **Track** — Groups detections across frames into `TextTrack` objects via greedy IoU matching (threshold 0.3). Unmatched detections start new tracks. Translates source text via googletrans on track creation.
 
@@ -260,7 +260,7 @@ code/
     video_io.py                     # VideoReader / VideoWriter
     stages/
       s1_detection/                 # S1: Detection + Tracking + Selection
-        detector.py                 #   EasyOCR wrapper, quality metrics
+        detector.py                 #   OCR backends (EasyOCR / PaddleOCR), quality metrics
         tracker.py                  #   IoU matching, optical flow gap-filling
         selector.py                 #   Reference frame selection, translation
         stage.py                    #   Orchestrator

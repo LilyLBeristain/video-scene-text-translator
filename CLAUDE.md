@@ -38,7 +38,7 @@ build:  (N/A — not a distributable package)
 - NumPy — array operations
 - PyYAML — config loading
 - Pillow — image I/O
-- EasyOCR — scene text detection (not yet installed)
+- EasyOCR / PaddleOCR — scene text detection (configurable via `detection.ocr_backend`)
 - googletrans 4.0.0-rc1 — translation API (not yet installed)
 - pytest + pytest-cov — testing (105 tests)
 - ruff — linting and formatting
@@ -64,7 +64,7 @@ build:  (N/A — not a distributable package)
 - Domain-specific rules auto-load from .claude/rules/ when working in matching paths
 
 ## Gotchas
-- Never import easyocr or googletrans at module level — they're lazy-loaded and may not be installed
+- Never import easyocr, paddleocr, or googletrans at module level — they're lazy-loaded and may not be installed
 - Always activate conda env before running tests or pipeline
 - All frames loaded into memory — will break on long videos (>500 frames)
 - googletrans is unofficial and may fail silently — always verify translation output

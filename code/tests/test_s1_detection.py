@@ -4,11 +4,14 @@ Tests grouping, scoring, and reference selection logic.
 OCR and translation are mocked to avoid external dependencies.
 """
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
 from src.data_types import BBox, Quad, TextDetection, TextTrack
 from src.stages.s1_detection import DetectionStage
+from src.stages.s1_detection.detector import TextDetector
 from src.stages.s1_detection.tracker import TextTracker, bbox_iou
 
 
@@ -289,3 +292,125 @@ class TestTranslateText:
         stage.selector._translator = FailingTranslator()
         result = stage.selector.translate_text("COFFEE")
         assert result == "COFFEE"
+
+
+class TestPaddleOCRBackend:
+    """Tests for PaddleOCR detection backend (mocked to avoid dependency)."""
+
+    def _make_frame(self, h=200, w=300):
+        """Create a non-uniform test frame so sharpness/contrast are computable."""
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        # Add some variation so quality metrics don't degenerate
+        frame[50:150, 50:250] = 200
+        frame[80:120, 100:200] = 50
+        return frame
+
+    def _make_paddle_result(self, texts, polys, scores):
+        """Build a fake PaddleOCR result dict matching the real API shape."""
+        return [{"rec_texts": texts, "rec_polys": polys, "rec_scores": scores}]
+
+    def test_detect_paddleocr_basic(self, default_config):
+        """PaddleOCR backend should produce TextDetections from mocked results."""
+        default_config.detection.ocr_backend = "paddleocr"
+        detector = TextDetector(default_config.detection)
+
+        quad_points = np.array(
+            [[50, 50], [200, 50], [200, 100], [50, 100]], dtype=np.float32
+        )
+        mock_ocr = MagicMock()
+        mock_ocr.predict.return_value = self._make_paddle_result(
+            texts=["HELLO"],
+            polys=[quad_points],
+            scores=[0.95],
+        )
+        detector._paddle_ocr = mock_ocr
+
+        frame = self._make_frame()
+        dets = detector.detect_text_in_frame(frame, frame_idx=0)
+
+        assert len(dets) == 1
+        assert dets[0].text == "HELLO"
+        assert dets[0].ocr_confidence == pytest.approx(0.95)
+        assert dets[0].frame_idx == 0
+        assert dets[0].quad.points.shape == (4, 2)
+
+    def test_detect_paddleocr_filters_low_confidence(self, default_config):
+        """Detections below ocr_confidence_threshold should be filtered."""
+        default_config.detection.ocr_backend = "paddleocr"
+        default_config.detection.ocr_confidence_threshold = 0.5
+        detector = TextDetector(default_config.detection)
+
+        quad_points = np.array(
+            [[50, 50], [200, 50], [200, 100], [50, 100]], dtype=np.float32
+        )
+        mock_ocr = MagicMock()
+        mock_ocr.predict.return_value = self._make_paddle_result(
+            texts=["LOW", "HIGH"],
+            polys=[quad_points, quad_points],
+            scores=[0.3, 0.8],
+        )
+        detector._paddle_ocr = mock_ocr
+
+        frame = self._make_frame()
+        dets = detector.detect_text_in_frame(frame, frame_idx=0)
+
+        assert len(dets) == 1
+        assert dets[0].text == "HIGH"
+
+    def test_detect_paddleocr_filters_small_area(self, default_config):
+        """Detections with area below min_text_area should be filtered."""
+        default_config.detection.ocr_backend = "paddleocr"
+        default_config.detection.min_text_area = 5000
+        detector = TextDetector(default_config.detection)
+
+        # Small quad: 20x10 = 200 area (below 5000 threshold)
+        small_quad = np.array(
+            [[10, 10], [30, 10], [30, 20], [10, 20]], dtype=np.float32
+        )
+        mock_ocr = MagicMock()
+        mock_ocr.predict.return_value = self._make_paddle_result(
+            texts=["TINY"],
+            polys=[small_quad],
+            scores=[0.9],
+        )
+        detector._paddle_ocr = mock_ocr
+
+        frame = self._make_frame()
+        dets = detector.detect_text_in_frame(frame, frame_idx=0)
+
+        assert len(dets) == 0
+
+    def test_detect_paddleocr_multiple_results(self, default_config):
+        """Multiple text regions should all be detected."""
+        default_config.detection.ocr_backend = "paddleocr"
+        detector = TextDetector(default_config.detection)
+
+        quad1 = np.array(
+            [[10, 10], [100, 10], [100, 50], [10, 50]], dtype=np.float32
+        )
+        quad2 = np.array(
+            [[10, 100], [100, 100], [100, 150], [10, 150]], dtype=np.float32
+        )
+        mock_ocr = MagicMock()
+        mock_ocr.predict.return_value = self._make_paddle_result(
+            texts=["HELLO", "WORLD"],
+            polys=[quad1, quad2],
+            scores=[0.9, 0.85],
+        )
+        detector._paddle_ocr = mock_ocr
+
+        frame = self._make_frame()
+        dets = detector.detect_text_in_frame(frame, frame_idx=5)
+
+        assert len(dets) == 2
+        assert dets[0].text == "HELLO"
+        assert dets[1].text == "WORLD"
+        assert all(d.frame_idx == 5 for d in dets)
+
+    def test_unknown_backend_raises(self, default_config):
+        """Unknown ocr_backend should raise ValueError."""
+        default_config.detection.ocr_backend = "unknown_ocr"
+        detector = TextDetector(default_config.detection)
+        frame = self._make_frame()
+        with pytest.raises(ValueError, match="Unknown ocr_backend"):
+            detector.detect_text_in_frame(frame, frame_idx=0)

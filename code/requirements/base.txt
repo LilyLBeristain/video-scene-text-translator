@@ -1,6 +1,7 @@
 numpy>=1.24.0
 opencv-python>=4.8.0
-googletrans==4.0.0-rc1
+#googletrans==4.0.0-rc1
+googletrans-py==4.0.0
 PyYAML>=6.0
 Pillow>=10.0.0
 
