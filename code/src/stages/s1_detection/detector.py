@@ -45,14 +45,31 @@ class TextDetector:
     
     def _filter_detected_texts(self, detections: list[TextDetection]) -> list[TextDetection]:
         """filter out numbers, symbols, or very short texts that are unlikely to be meaningful for translation."""
+        from wordfreq import zipf_frequency
+
         filtered = []
         for det in detections:
-            if len(det.text.strip()) < 2:
+            text = det.text.strip()
+            if len(text) < 2:
                 continue
-            if det.text.strip().isdigit():
+            if text.isdigit():
+                continue
+            if not self._is_plausible_text(text, zipf_frequency):
+                logger.debug("Filtered gibberish text: %r", text)
                 continue
             filtered.append(det)
         return filtered
+
+    @staticmethod
+    def _is_plausible_text(
+        text: str, zipf_frequency, lang: str = "en", threshold: float = 2.0
+    ) -> bool:
+        """Return True if the average word frequency suggests real language."""
+        words = text.lower().split()
+        if not words:
+            return False
+        min_freq = min(zipf_frequency(w, lang) for w in words)
+        return min_freq >= threshold
 
     def detect_text_in_frame(
         self, frame: np.ndarray, frame_idx: int

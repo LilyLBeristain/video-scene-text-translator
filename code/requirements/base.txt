@@ -4,6 +4,7 @@ opencv-python>=4.8.0
 googletrans-py==4.0.0
 PyYAML>=6.0
 Pillow>=10.0.0
+wordfreq
 
 # Testing
 pytest>=7.4.0
