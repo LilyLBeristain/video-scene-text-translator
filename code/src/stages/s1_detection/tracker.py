@@ -69,6 +69,13 @@ class TextTracker:
                 for track_id, last_det in active.items():
                     if track_id in matched_track_ids:
                         continue
+                    if abs(last_det.frame_idx - frame_idx) > self.config.track_break_threshold:
+                        continue  # Only consider tracks from the previous sampled frame
+                    # only consider possble to be in one track if text similarity is above a threshold
+                    # (e.g. 0.6) to avoid matching different text instances that happen to be close together
+                    text_similarity = self._compute_text_similarity(det.text, last_det.text)
+                    if text_similarity < 0.6:
+                        continue
                     iou = bbox_iou(det.bbox, last_det.bbox)
                     if iou > best_iou:
                         best_iou = iou
@@ -152,6 +159,16 @@ class TextTracker:
                     )
 
         return tracks
+    
+    def _compute_text_similarity(self, text1: str, text2: str) -> float:
+        """Compute a simple text similarity score between two strings."""
+        set1 = set(text1.lower().split())
+        set2 = set(text2.lower().split())
+        if not set1 or not set2:
+            return 0.0
+        intersection = len(set1.intersection(set2))
+        union = len(set1.union(set2))
+        return intersection / union
 
     def _track_quad_across_frames(
         self,

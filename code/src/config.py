@@ -30,6 +30,8 @@ class DetectionConfig:
     ref_weight_frontality: float = 0.3  # bbox area ratio
     # Process every N-th frame for detection (1 = every frame)
     frame_sample_rate: int = 1
+    # track_break_threshold: maximum number of frames to allow between detections in the same track
+    track_break_threshold: int = 5
     # Optical flow for tracking quads between frames
     optical_flow_method: str = "farneback"  # "farneback", "lucas_kanade", or "cotracker"
     # "gaps_only": only fill frames missing OCR detections (original behavior)
@@ -90,10 +92,8 @@ class TextEditorConfig:
 @dataclass
 class TPMDataGenConfig:
     # For generating data for text propagation model training instead of video output
-    output_dir: str = "tpm_data_output"
     save_detected_tracks: bool = True  # Whether to save S1 tracks to JSON for reuse
     load_detected_tracks: bool = False  # Whether to load S1 tracks from JSON instead of re-running detection
-    max_tracks: int = 100
     max_frames_per_track: int = 20
     frame_sample_rate: int = 1  # Sample every N-th frame from each track
 
