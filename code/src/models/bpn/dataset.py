@@ -175,6 +175,52 @@ class BPNDataset(Dataset):
         img = img.resize((self.image_size[1], self.image_size[0]), Image.BILINEAR)
         return torch.from_numpy(np.array(img)).permute(2, 0, 1).float().div_(255.0)
 
+    def get_track_window(self, sample_idx: int, num_targets: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (ref, targets) tensors from the same track as sample_idx.
+
+        ref: (3, H, W) — first frame of the sample's window (the reference)
+        targets: (T, 3, H, W) where T <= num_targets — consecutive frames
+                 from the same track immediately following the reference
+
+        Used by evaluation to visualize many target frames at once. The model
+        can still only process n_neighbors targets per forward pass; callers
+        should run it in sliding chunks.
+        """
+        track_id = self.sample_track_ids[sample_idx]
+
+        # Collect all unique frame keys belonging to this track, in order
+        if self.cache_in_ram:
+            # Each sample is an int index array; flatten + dedupe across all
+            # samples sharing the same track_id
+            seen: set[int] = set()
+            ordered: list[int] = []
+            for i, tid in enumerate(self.sample_track_ids):
+                if tid != track_id:
+                    continue
+                for k in self.samples[i]:
+                    ki = int(k)
+                    if ki not in seen:
+                        seen.add(ki)
+                        ordered.append(ki)
+            ordered.sort()  # contiguous integer range within a track
+            # Reference = first frame of the requested sample
+            ref_key = int(self.samples[sample_idx][0])
+        else:
+            # Non-cached: samples are (frame_paths, start). All samples in a
+            # track share the same frame_paths list, so just grab it once.
+            frame_paths, start = self.samples[sample_idx]
+            ordered = list(frame_paths)  # already sorted by build order
+            ref_key = frame_paths[start]
+
+        # Find ref position in ordered list, then take up to num_targets after
+        ref_pos = ordered.index(ref_key)
+        target_keys = ordered[ref_pos + 1 : ref_pos + 1 + num_targets]
+
+        ref = self._load_image(ref_key)
+        targets = torch.stack([self._load_image(k) for k in target_keys]) \
+                  if target_keys else torch.empty(0, 3, *self.image_size)
+        return ref, targets
+
     def __len__(self) -> int:
         return len(self.samples)
 

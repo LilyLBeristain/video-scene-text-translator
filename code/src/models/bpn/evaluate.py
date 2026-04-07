@@ -111,14 +111,16 @@ def generate_visualizations(
     device: torch.device,
     output_dir: Path,
     max_samples: int = 20,
+    targets_per_sample: int = 16,
 ):
     """Generate side-by-side comparison images.
 
-    Each sample is drawn from a different track so the visualizations cover
-    diverse content rather than 20 near-identical frames from 2 tracks.
+    Each sample is drawn from a different track. For each sample we visualize
+    up to `targets_per_sample` consecutive target frames (or fewer if the
+    track is shorter). The model is run in sliding chunks of n_neighbors to
+    cover all targets, since the network's input window is fixed.
 
-    Layout per sample: ref | target_i | predicted_i | |target - predicted|
-    Saves as PNG files using cv2 (headless).
+    Layout per sample: rows of [ref | target_i | predicted_i | diff_i].
     """
     import cv2
 
@@ -126,67 +128,83 @@ def generate_visualizations(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = loader.dataset
+    n_neighbors = model.n_neighbors
     selected_indices = _select_samples_from_distinct_tracks(dataset, max_samples)
     print(f"Selected {len(selected_indices)} samples from {len(selected_indices)} distinct tracks")
 
-    sample_idx = 0
-    for ds_idx in selected_indices:
-        item = dataset[ds_idx]
-        images = item["images"].unsqueeze(0).to(device)
-        ref = item["ref_image"].unsqueeze(0).to(device)
-        neighbors = item["neighbor_images"].unsqueeze(0).to(device)
+    for sample_idx, ds_idx in enumerate(selected_indices):
+        ref, targets = dataset.get_track_window(ds_idx, targets_per_sample)
+        T = targets.shape[0]
+        if T == 0:
+            continue
 
-        pred = model(images)
-        B, N, C, H, W = neighbors.shape
+        ref_dev = ref.unsqueeze(0).to(device)         # (1, 3, H, W)
+        targets_dev = targets.to(device)               # (T, 3, H, W)
 
-        for b in range(B):
-            ref_np = _tensor_to_bgr(ref[b])  # (H, W, 3)
-            rows = []
+        # Run model in sliding chunks of n_neighbors. For each target index t,
+        # we want a prediction; we use the chunk that contains it. To minimize
+        # forward passes, do non-overlapping chunks tiling [0, T).
+        pred_sigma_x = torch.zeros(T, device=device)
+        pred_sigma_y = torch.zeros(T, device=device)
+        pred_rho = torch.zeros(T, device=device)
+        pred_w = torch.zeros(T, device=device)
 
-            for i in range(N):
-                blurred = blur_module(
-                    ref[b:b+1],
-                    pred["sigma_x"][b:b+1, i],
-                    pred["sigma_y"][b:b+1, i],
-                    pred["rho"][b:b+1, i],
-                    pred["w"][b:b+1, i],
-                )
-                pred_np = _tensor_to_bgr(blurred[0])
-                target_np = _tensor_to_bgr(neighbors[b, i])
-                diff_np = np.abs(target_np.astype(float) - pred_np.astype(float))
-                diff_np = (diff_np * 3).clip(0, 255).astype(np.uint8)  # amplify
+        for chunk_start in range(0, T, n_neighbors):
+            chunk_end = min(chunk_start + n_neighbors, T)
+            chunk_len = chunk_end - chunk_start
 
-                # Add labels
-                label_h = 20
-                ref_labeled = _add_label(ref_np, "Reference", label_h)
-                target_labeled = _add_label(target_np, f"Target {i}", label_h)
-                pred_labeled = _add_label(pred_np, f"Predicted {i}", label_h)
-                diff_labeled = _add_label(diff_np, f"Diff {i} (3x)", label_h)
+            # Pad chunk to n_neighbors by repeating last target
+            chunk = targets_dev[chunk_start:chunk_end]
+            if chunk_len < n_neighbors:
+                pad = chunk[-1:].expand(n_neighbors - chunk_len, -1, -1, -1)
+                chunk = torch.cat([chunk, pad], dim=0)
 
-                row = np.concatenate(
-                    [ref_labeled, target_labeled, pred_labeled, diff_labeled],
-                    axis=1,
-                )
-                rows.append(row)
+            # Build network input: ref + n_neighbors targets, all concatenated
+            stacked = torch.cat([ref_dev[0], *chunk], dim=0).unsqueeze(0)  # (1, 3*(N+1), H, W)
+            out = model(stacked)
+            pred_sigma_x[chunk_start:chunk_end] = out["sigma_x"][0, :chunk_len]
+            pred_sigma_y[chunk_start:chunk_end] = out["sigma_y"][0, :chunk_len]
+            pred_rho[chunk_start:chunk_end] = out["rho"][0, :chunk_len]
+            pred_w[chunk_start:chunk_end] = out["w"][0, :chunk_len]
 
-            # Add parameter text
-            param_text = (
-                f"sigma_x={pred['sigma_x'][b].cpu().numpy()}, "
-                f"sigma_y={pred['sigma_y'][b].cpu().numpy()}, "
-                f"w={pred['w'][b].cpu().numpy()}"
+        # Build visualization rows
+        ref_np = _tensor_to_bgr(ref_dev[0])
+        H, W = ref_np.shape[:2]
+        rows = []
+        for i in range(T):
+            blurred = blur_module(
+                ref_dev,
+                pred_sigma_x[i:i+1],
+                pred_sigma_y[i:i+1],
+                pred_rho[i:i+1],
+                pred_w[i:i+1],
             )
+            pred_np = _tensor_to_bgr(blurred[0])
+            target_np = _tensor_to_bgr(targets_dev[i])
+            diff_np = np.abs(target_np.astype(float) - pred_np.astype(float))
+            diff_np = (diff_np * 3).clip(0, 255).astype(np.uint8)
 
-            vis = np.concatenate(rows, axis=0)
-            # Scale up for visibility (ROIs are small)
-            scale = max(1, 256 // H)
-            vis = cv2.resize(vis, None, fx=scale, fy=scale,
-                             interpolation=cv2.INTER_NEAREST)
+            label_h = 20
+            ref_labeled = _add_label(ref_np, "Reference", label_h)
+            target_labeled = _add_label(target_np, f"Target {i}", label_h)
+            pred_labeled = _add_label(pred_np, f"Predicted {i}", label_h)
+            diff_labeled = _add_label(diff_np, f"Diff {i} (3x)", label_h)
 
-            out_path = output_dir / f"sample_{sample_idx:04d}.png"
-            cv2.imwrite(str(out_path), vis)
-            sample_idx += 1
+            row = np.concatenate(
+                [ref_labeled, target_labeled, pred_labeled, diff_labeled],
+                axis=1,
+            )
+            rows.append(row)
 
-    print(f"Saved {sample_idx} visualizations to {output_dir}")
+        vis = np.concatenate(rows, axis=0)
+        scale = max(1, 256 // H)
+        vis = cv2.resize(vis, None, fx=scale, fy=scale,
+                         interpolation=cv2.INTER_NEAREST)
+
+        out_path = output_dir / f"sample_{sample_idx:04d}.png"
+        cv2.imwrite(str(out_path), vis)
+
+    print(f"Saved {len(selected_indices)} visualizations to {output_dir}")
 
 
 def plot_training_log(log_path: str, output_dir: Path):
@@ -255,7 +273,9 @@ def main():
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--output-dir", type=str, default="eval_output/bpn")
     parser.add_argument("--max-vis", type=int, default=20,
-                        help="Max visualization samples")
+                        help="Max visualization samples (one per track)")
+    parser.add_argument("--targets-per-sample", type=int, default=16,
+                        help="Number of consecutive target frames per sample")
     parser.add_argument("--training-log", type=str, default=None,
                         help="Path to training log JSON for curve plotting")
     args = parser.parse_args()
@@ -305,7 +325,8 @@ def main():
     # Visual evaluation
     print("Generating visualizations...")
     generate_visualizations(model, val_loader, blur_module, device,
-                            output_dir / "vis", max_samples=args.max_vis)
+                            output_dir / "vis", max_samples=args.max_vis,
+                            targets_per_sample=args.targets_per_sample)
 
     # Training curves
     if args.training_log:
