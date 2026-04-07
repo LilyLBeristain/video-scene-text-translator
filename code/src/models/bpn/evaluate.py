@@ -81,7 +81,7 @@ def evaluate_metrics(
 
 
 def _select_samples_from_distinct_tracks(
-    dataset, max_samples: int, seed: int = 0,
+    dataset, max_samples: int, seed: int | None = None,
 ) -> list[int]:
     """Pick dataset indices such that each comes from a different track.
 
@@ -90,7 +90,7 @@ def _select_samples_from_distinct_tracks(
     random sample from each.
     """
     import random as _random
-    rng = _random.Random(seed)
+    rng = _random.Random(seed)  # seed=None -> system entropy, different each run
 
     track_to_indices: dict[str, list[int]] = {}
     for i, tid in enumerate(dataset.sample_track_ids):
