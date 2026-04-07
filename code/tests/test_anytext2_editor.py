@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 
@@ -128,11 +131,6 @@ class TestGradioCall:
     @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
     def test_edit_text_calls_predict(self, mock_get_client, editor: AnyText2Editor):
         """edit_text should call the Gradio submit endpoint."""
-        import tempfile
-        from pathlib import Path
-
-        import cv2
-
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_result_path = str(Path(tmpdir) / "result.png")
             fake_img = np.full((300, 500, 3), 128, dtype=np.uint8)
@@ -177,11 +175,6 @@ class TestGradioCall:
     @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
     def test_result_resized_to_original(self, mock_get_client, editor: AnyText2Editor):
         """If ROI was clamped, result should be resized back to original dims."""
-        import tempfile
-        from pathlib import Path
-
-        import cv2
-
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_result_path = str(Path(tmpdir) / "result.png")
             fake_img = np.full((256, 256, 3), 128, dtype=np.uint8)

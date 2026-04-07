@@ -14,7 +14,7 @@
 - `default.yaml` keeps `backend: "placeholder"` for offline testing
 
 ### Testing
-- 15 new unit tests for AnyText2Editor: color extraction, dimension clamping, edge cases, mocked Gradio calls, S3 integration
+- 20 new unit tests for AnyText2Editor: color extraction, dimension clamping, edge cases, mocked Gradio calls, config validation, S3 integration
 - All tests run without AnyText2 server (fully mocked)
 
 ### Misc
