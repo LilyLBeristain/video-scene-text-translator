@@ -33,6 +33,8 @@ Thumbs.db
 # Project-specific
 code/debug_output/
 _refs/
+code/checkpoints/
+code/eval_output/
 
 # Claude Code (track commands/agents/skills, ignore local files)
 .claude/local.md
