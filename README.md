@@ -314,7 +314,33 @@ cd ../../..
 pip install "gradio_client>=1.5.0"
 ```
 
-### 8. AnyText2 server
+### 8. Install SRNet (background inpainter for LCM)
+
+SRNet provides the background inpainting subnetwork used by the Lighting Correction Module (LCM) in S4. The install script clones the repo and downloads the pretrained checkpoint (~88 MB) via `gdown`.
+
+```bash
+pip install gdown
+cd third_party
+bash install_srnet.sh
+cd ..
+```
+
+This creates `third_party/SRNet/` with the checkpoint at `third_party/SRNet/checkpoints/trained_final_5M_.model`.
+
+> **Note:** Only the background inpainting subnetwork (`_bin`) is used — SRNet's other dependencies are not required.
+
+### 9. Download BPN checkpoint (blur prediction)
+
+The Blur Prediction Network (BPN) predicts per-frame differential blur to match each target frame's sharpness. Download the pretrained checkpoint (~136 MB):
+
+```bash
+# From repo root:
+bash checkpoints/download.sh
+```
+
+This creates `checkpoints/bpn/bpn_v0.pt`. Alternatively, download manually from [Google Drive](https://drive.google.com/file/d/1ZUDMCDw6tJka-0Dxkhev2bRvkkLMcKpv/view?usp=drive_link) and place it in `checkpoints/bpn/`.
+
+### 10. AnyText2 server
 
 AnyText2 runs in a **separate** conda env (Python 3.10) to avoid dependency conflicts.
 See [`third_party/install_anytext2.sh`](third_party/install_anytext2.sh) for setup instructions.
@@ -332,8 +358,15 @@ text_editor:
 ```bash
 conda activate vc_final
 cd code
-python -m pytest tests/ -v          # All tests should pass
-ruff check .                        # Lint check
+
+# Unit + integration tests (no GPU/server required)
+python -m pytest tests/ -v
+
+# Lint
+ruff check .
+
+# Full end-to-end (requires GPU + AnyText2 server + test video)
+python -m pytest tests/e2e/ -v
 ```
 
 ## Usage
@@ -376,19 +409,31 @@ code/
         stage.py                    #   Orchestrator
       s2_frontalization.py          # S2: Canonical rect homography
       s3_text_editing.py            # S3: Warp to frontal, edit text
-      s4_propagation.py             # S4: Frontalize + histogram match + alpha mask
+      s4_propagation/               # S4: Lighting correction + blur matching + alpha mask
+        stage.py                    #   Orchestrator (LCM or histogram fallback + BPN)
+        lighting_correction_module.py  # Per-pixel ratio map from inpainted backgrounds
+        srnet_inpainter.py          #   SRNet background inpainting wrapper
+        bpn_predictor.py            #   BPN differential blur prediction wrapper
+        base_inpainter.py           #   ABC for background inpainters
       s5_revert.py                  # S5: De-frontalize + bounded warp + composite
     models/
       base_text_editor.py           # ABC for Stage A models
       placeholder_editor.py         # cv2.putText placeholder
       anytext2_editor.py            # AnyText2 via Gradio API
+      bpn/                          # BPN training code (model, dataset, losses, train, eval)
     utils/
       geometry.py                   # Homography, quad metrics, canonical rect
       image_processing.py           # Sharpness, contrast, histogram matching
       optical_flow.py               # Farneback + Lucas-Kanade wrappers
   config/
-    default.yaml                    # All configurable parameters
-  tests/                            # 162 unit + integration tests
+    default.yaml                    # Classical CV defaults (EasyOCR + Farneback)
+    adv.yaml                        # Advanced config (PaddleOCR + CoTracker + AnyText2 + LCM + BPN)
+  tests/                            # Tiered: unit/ stages/ models/ integration/ e2e/
   scripts/
     run_pipeline.py                 # CLI entry point
+checkpoints/
+  bpn/bpn_v0.pt                    # BPN pretrained checkpoint
+third_party/
+  co-tracker/                       # CoTracker3 (optical flow)
+  SRNet/                            # SRNet (background inpainting for LCM)
 ```
