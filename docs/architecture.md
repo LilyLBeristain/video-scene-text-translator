@@ -6,20 +6,27 @@
 ## Module Map
 | Module | Responsibility | Interfaces |
 |--------|---------------|------------|
-| `pipeline.py` | Orchestrator: wires S1→S5, manages frame I/O | Calls all stages; uses VideoReader/Writer |
+| `pipeline.py` | Main orchestrator: wires S1→S5, manages frame I/O (in-memory) | Calls all stages; uses VideoReader/Writer |
+| `tpm_data_gen_pipeline.py` | TPM data gen orchestrator: streaming 2-pass, extracts ROIs for TPM training | Uses StreamingDetectionStage + S2; VideoReader |
 | `data_types.py` | Core dataclasses: BBox, Quad, TextDetection, TextTrack, FrameHomography, PropagatedROI, PipelineResult | Consumed by all stages |
-| `config.py` | YAML config loading, validation, CLI override support | Loaded by pipeline, passed to all stages |
-| `video_io.py` | VideoReader / VideoWriter with context manager support | Used by pipeline.py |
-| `s1_detection.py` | EasyOCR detection → IoU tracking → translation → composite scoring → reference frame selection | In: frames → Out: list[TextTrack] |
-| `s2_frontalization.py` | Optical flow quad tracking → homography computation per frame | In: TextTrack + frames → Out: dict[frame_idx → FrameHomography] |
+| `config.py` | YAML config loading, validation, CLI override support. Includes `TPMDataGenConfig`. | Loaded by pipeline, passed to all stages |
+| `video_io.py` | VideoReader / VideoWriter with context manager support; sequential seek optimization | Used by both pipelines |
+| `s1_detection/detector.py` | EasyOCR or PaddleOCR detection with quality scoring + wordfreq gibberish filtering | In: frame → Out: list[TextDetection] |
+| `s1_detection/tracker.py` | IoU tracking with track break threshold + text similarity check + frame-range-bounded propagation | In: detections → Out: list[TextTrack] |
+| `s1_detection/selector.py` | Reference frame selection: hard pre-filters → 2-metric composite + max_frame_offset constraint | In: TextTrack → Out: reference_frame_idx |
+| `s1_detection/stage.py` | In-memory S1 orchestrator: detect → track → translate → gap-fill → select | In: frames → Out: list[TextTrack] |
+| `s1_detection/streaming_stage.py` | Streaming S1 orchestrator: 2-pass (OCR → gap-fill per-track) via VideoReader | In: VideoReader → Out: list[TextTrack] |
+| `s1_detection/streaming_tracker.py` | Streaming gap-filler: per-track seek + pairwise or CoTracker online flow | In: tracks + VideoReader → Out: tracks with filled gaps |
+| `s2_frontalization.py` | Homography computation: frame quad → canonical frontal rectangle | In: TextTrack + frames → Out: H stored on TextDetection |
 | `s3_text_editing.py` | Stage A model wrapper via BaseTextEditor | In: reference ROI + target_text → Out: edited ROI |
 | `s4_propagation/` | LCM (per-pixel ratio map from inpainted backgrounds, when available) or YCrCb luminance histogram matching as fallback, + feathered alpha mask creation. BPN integration in progress. | In: edited ROI + frame ROIs (+ inpainted backgrounds when available) → Out: dict[frame_idx → PropagatedROI] |
 | `s5_revert.py` | Inverse homography warp + alpha blending + compositing | In: PropagatedROIs + frames → Out: final output frames |
 | `base_text_editor.py` | ABC for Stage A models (edit_text, load_model) | Subclassed by concrete model backends |
-| `placeholder_editor.py` | OpenCV putText placeholder for pipeline testing | Implements BaseTextEditor |
+| `placeholder_editor.py` | Pillow-based placeholder for pipeline testing (supports accented chars) | Implements BaseTextEditor |
 | `geometry.py` | Homography computation, quad metrics (area, frontality, bbox ratio), point warping | Used by S1, S2, S5 |
 | `image_processing.py` | Sharpness (Laplacian), contrast (Otsu interclass variance), histogram matching | Used by S1, S4 |
-| `optical_flow.py` | Farneback (dense) + Lucas-Kanade (sparse) optical flow wrappers | Used by S2 |
+| `optical_flow.py` | Farneback (dense) + Lucas-Kanade (sparse) optical flow wrappers | Used by S1 tracker |
+| `cotracker_online.py` | CoTracker3 online mode wrapper: chunked sliding-window GPU point tracking | Used by streaming tracker |
 
 ## Implementation Stages
 
@@ -31,11 +38,18 @@ Separate work, not in `code/`. Models consumed via `BaseTextEditor` interface.
 
 ### Stage B — Classical Video Pipeline (IMPLEMENTED)
 Uses classical CV methods, aligned with STRIVE's frontalization-first design. 5-stage pipeline:
-1. **S1 Detection + Tracking + Selection**: Split into submodules (`s1_detection/detector.py`, `tracker.py`, `selector.py`, `stage.py`). EasyOCR → detect text on sampled frames → IoU tracking → optical flow gap-filling (bidirectional from reference, covers all frames) → Google Translate → reference frame selection (4-metric scoring → 2-stage pre-filter → 2-metric composite). Updates source_text from reference frame's OCR.
+1. **S1 Detection + Tracking + Selection**: Split into submodules (`s1_detection/detector.py`, `tracker.py`, `selector.py`, `stage.py`). Two OCR backends: EasyOCR or PaddleOCR (configurable via `detection.ocr_backend`). Detections filtered by wordfreq gibberish scoring + optional word whitelist. IoU tracking with configurable track break threshold + text similarity checks. Optical flow gap-filling: Farneback (classical), Lucas-Kanade, or CoTracker3 (learned, GPU). Gap-fill bounded to track's frame range. Two strategies: `gaps_only` (fill missing frames) or `full_propagation` (overwrite all quads from reference). Reference selection: 4-metric scoring → 2-stage pre-filter → 2-metric composite, with `max_frame_offset` constraint for CoTracker online mode.
 2. **S2 Frontalization**: Computes homography from each frame's quad to a canonical frontal rectangle (axis-aligned, derived from reference quad dimensions). Stores `H_to_frontal` / `H_from_frontal` directly on TextDetection. Pure geometry — no pixels warped.
 3. **S3 Text Editing**: Warps reference frame to canonical frontal via `H_to_frontal` → passes clean frontal ROI to `BaseTextEditor.edit_text()` → stores edited_roi. Falls back to bbox crop if no homography.
 4. **S4 Propagation**: Warps each frame to canonical frontal via `H_to_frontal` → histogram matches luminance (CDF-based, YCrCb Y channel) against the frontalized edited ROI — pixel-aligned comparison. Creates feathered alpha mask. Falls back to bbox crop if no homography.
 5. **S5 Revert**: Reads `H_from_frontal` from TextDetection → warps edited ROI to bounded target bbox region (not full frame) via `T @ H_from_frontal` → alpha blends only within bbox slice.
+
+### TPM Data Generation Pipeline (IMPLEMENTED)
+Streaming 2-pass pipeline for generating training data for the TPM (Text Propagation Model). Uses `StreamingDetectionStage` instead of in-memory `DetectionStage` to process arbitrarily long videos with bounded memory.
+- **Pass 1 (streaming)**: Stream frames sequentially via `VideoReader` → OCR detect at sample_rate intervals → group into tracks → select reference frames. No frame retention in memory.
+- **Pass 2 (per-track)**: For each track, seek to start frame → streaming optical flow gap-fill (pairwise Farneback or CoTracker online) → S2 homography → warp + extract canonical ROIs → save to disk.
+- **CoTracker online mode**: `CoTrackerOnlineFlowTracker` wraps `CoTrackerOnlinePredictor` for chunked sliding-window tracking (~16 frames in VRAM). Short tracks (<step×2 frames) fall back to pairwise Farneback automatically.
+- **Track serialization**: Supports save/load detected tracks as JSON for pipeline debugging (`tpm_data_gen.save_detected_tracks` / `load_detected_tracks`).
 
 ### Stage C — Full STRIVE Pipeline (NOT YET IMPLEMENTED)
 - Replace S2 homography with STTN (Spatial-Temporal Transformer Network) — learned frontalization with temporal consistency
@@ -47,10 +61,11 @@ Uses classical CV methods, aligned with STRIVE's frontalization-first design. 5-
 - STTN processes frame stacks jointly for temporal smoothness; Stage B computes each frame's homography independently
 
 ## Cross-Cutting Concerns
-- **Config**: All parameters in `config/default.yaml`. Nested dataclasses with validation. CLI overrides via argparse in `run_pipeline.py`.
+- **Config**: Two configs: `config/default.yaml` (classical Farneback + EasyOCR) and `config/adv.yaml` (CoTracker + PaddleOCR). Nested dataclasses with validation. CLI overrides via argparse.
 - **Error handling**: Config validation gates bad input early. Fallback paths in reference selection (if pre-filters eliminate all candidates, use all detections). Empty-ROI guards in S1. Invalid homography checks in S2/S5.
-- **Logging**: Python logging module at INFO level per stage, DEBUG for detailed tracing. Level set via config.
-- **Memory**: All frames held in dict keyed by frame_idx. Works for short clips. Needs sliding-window refactor for long videos (>500 frames).
+- **Logging**: Python logging module at INFO level per stage, DEBUG for detailed tracing. Timing logs for OCR and optical flow. tqdm progress bars for CoTracker and OCR loops.
+- **Memory**: Main pipeline holds all frames in dict (works for short clips, breaks >500 frames). TPM data gen pipeline uses streaming VideoReader with bounded memory (~2-16 frames max).
+- **Third-party deps**: CoTracker3 and PaddleOCR installed via scripts in `third_party/`. Both are optional — pipeline falls back to Farneback/EasyOCR if not available.
 
 ## Key Design Decisions
 - **Central data structure**: `TextTrack` flows through all 5 stages. S1 creates it, S2-S5 enrich it. Prevents scattered state across stages.
@@ -63,24 +78,29 @@ Uses classical CV methods, aligned with STRIVE's frontalization-first design. 5-
 - **Matrices only, warp on-the-fly**: S2 stores 3×3 matrices, downstream stages warp when they need pixels. Keeps S2 as pure geometry, avoids memory bloat.
 
 ## Known Limitations
-- **Tracking**: IoU-based greedy matching breaks with large camera motion. Hungarian algorithm would improve but Stage C's STTN would replace entirely.
-- **Optical flow drift**: Accumulates over long sequences. Bidirectional propagation helps but not perfect.
+- **Tracking**: IoU-based greedy matching with configurable break threshold and text similarity checks. Breaks with large camera motion. Hungarian algorithm would improve but Stage C's STTN would replace entirely.
+- **Optical flow drift**: Accumulates over long sequences for classical methods. CoTracker3 produces smoother trajectories but requires GPU. Bidirectional propagation helps for classical methods.
 - **Gap-filling propagates to all frames**: Optical flow fills quads for ALL video frames, including frames where text is genuinely absent (occluded, out of view, camera cut). This causes false replacements. Fix options: (1) validate tracked quads — reject if area changes >50% between frames or quad becomes degenerate/self-intersecting, (2) appearance verification — check contrast/sharpness in tracked region to confirm text is still present.
 - **Lighting adaptation**: Global histogram matching on aligned ROIs — better than misaligned, but still doesn't handle spatially varying lighting (shadows, specular highlights). Per-pixel lighting ratio (classical LCM) would require inpainting to isolate background before computing the ratio, otherwise artifacts at text edges.
 - **No blur modeling**: Pipeline ignores motion blur and focus blur entirely. STRIVE's BPN predicts differential blur between frames — no classical equivalent without a learned model.
 - **Temporal jitter**: Each frame's homography is computed independently — no smoothing across time. Temporal smoothing would require decomposing homography into translation/rotation/scale before averaging (can't average raw 3×3 matrices).
-- **Placeholder editor**: cv2.putText produces crude output with no style matching. Awaiting real Stage A model integration.
+- **Placeholder editor**: Pillow-based text rendering (supports accented characters) but no style matching. Awaiting real Stage A model integration.
 - **Translation backend**: googletrans is unofficial/unreliable. Config supports google-cloud-translate but requires API key setup.
-- **Memory**: All frames in memory. Not viable for videos >500 frames without sliding-window refactor.
+- **Memory**: Main pipeline holds all frames in memory — not viable for >500 frames. TPM data gen pipeline uses streaming 2-pass (bounded memory), but main pipeline has not been migrated yet.
 
 ## Tech Stack
 - **Python 3.11 + conda**: Chosen for OpenCV/numpy ecosystem compatibility and team familiarity
 - **OpenCV**: Core CV operations — homography, optical flow, color space conversion, alpha blending
-- **EasyOCR**: Scene text detection — chosen over Tesseract for multi-language and scene-text robustness
-- **Farneback optical flow**: Default dense method, with Lucas-Kanade as sparse alternative (both classical, no GPU needed)
+- **EasyOCR**: Scene text detection — default OCR backend, good multi-language support
+- **PaddleOCR**: Alternative OCR backend — faster, better accuracy on some scenes, configurable via `detection.ocr_backend`
+- **CoTracker3**: Meta's learned point tracker — ~25x faster than Farneback, smoother trajectories. Offline mode for batch, online mode for streaming. Requires GPU.
+- **Farneback optical flow**: Classical dense method (CPU-only), default fallback. Lucas-Kanade as sparse alternative.
+- **wordfreq**: Gibberish detection — filters OCR noise using zipf frequency thresholds
+- **tqdm**: Progress bars for long-running OCR and CoTracker loops
+- **Pillow**: Image I/O and text rendering (supports accented/Unicode characters, replaced cv2.putText in placeholder editor)
 - **ruff**: Linting and formatting — fast, all-in-one Python linter
 
 ## Open Questions
 - Stage C: STTN model integration approach (replaces S2 homography with learned spatial transformer)
-- Stage C: TPM model integration approach (replaces S4 histogram matching with LCM + BPN)
-- Sliding-window frame loading strategy for long videos
+- Stage C: TPM model integration approach (replaces S4 histogram matching with LCM + BPN) — TPM data gen pipeline now exists to produce training data
+- ~~Sliding-window frame loading strategy for long videos~~ — **Resolved**: streaming 2-pass architecture in TPM data gen pipeline. Main pipeline still in-memory.

@@ -1,10 +1,12 @@
 numpy>=1.24.0
 opencv-python>=4.8.0
-#googletrans==4.0.0-rc1
-googletrans-py==4.0.0
+deep-translator>=1.11.0
 PyYAML>=6.0
 Pillow>=10.0.0
 wordfreq
+
+# Optional: AnyText2 backend (only needed when text_editor.backend == "anytext2")
+# gradio_client>=1.5.0
 
 # Testing
 pytest>=7.4.0

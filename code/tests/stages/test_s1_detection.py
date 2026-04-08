@@ -4,7 +4,7 @@ Tests grouping, scoring, and reference selection logic.
 OCR and translation are mocked to avoid external dependencies.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -280,25 +280,53 @@ class TestFillGaps:
 class TestTranslateText:
     def test_blank_text_short_circuits_translation(self, default_config):
         stage = DetectionStage(default_config)
+        with patch(
+            "deep_translator.GoogleTranslator"
+        ) as mock_cls:
+            mock_cls.side_effect = AssertionError("should not be called")
+            result = stage.selector.translate_text("   ")
+            assert result == "   "
 
-        class DummyTranslator:
-            def translate(self, *args, **kwargs):
-                raise AssertionError("translate() should not be called")
-
-        stage.selector._translator = DummyTranslator()
-        result = stage.selector.translate_text("   ")
-        assert result == "   "
-
-    def test_translation_error_falls_back_to_source_text(self, default_config):
+    def test_deep_translator_google_success(self, default_config):
         stage = DetectionStage(default_config)
+        with patch(
+            "deep_translator.GoogleTranslator"
+        ) as mock_cls:
+            mock_cls.return_value.translate.return_value = "PELIGRO"
+            result = stage.selector.translate_text("DANGER")
+            assert result == "PELIGRO"
+            mock_cls.assert_called_once_with(source="en", target="es")
 
-        class FailingTranslator:
-            def translate(self, *args, **kwargs):
-                raise RuntimeError("translator unavailable")
+    def test_deep_translator_google_fails_mymemory_fallback(self, default_config):
+        stage = DetectionStage(default_config)
+        with (
+            patch(
+                "deep_translator.GoogleTranslator"
+            ) as mock_google,
+            patch(
+                "deep_translator.MyMemoryTranslator"
+            ) as mock_mm,
+        ):
+            mock_google.return_value.translate.side_effect = RuntimeError("blocked")
+            mock_mm.return_value.translate.return_value = "PELIGRO"
+            result = stage.selector.translate_text("DANGER")
+            assert result == "PELIGRO"
+            mock_mm.assert_called_once_with(source="en", target="es")
 
-        stage.selector._translator = FailingTranslator()
-        result = stage.selector.translate_text("COFFEE")
-        assert result == "COFFEE"
+    def test_both_backends_fail_returns_source_text(self, default_config):
+        stage = DetectionStage(default_config)
+        with (
+            patch(
+                "deep_translator.GoogleTranslator"
+            ) as mock_google,
+            patch(
+                "deep_translator.MyMemoryTranslator"
+            ) as mock_mm,
+        ):
+            mock_google.return_value.translate.side_effect = RuntimeError("blocked")
+            mock_mm.return_value.translate.side_effect = RuntimeError("also down")
+            result = stage.selector.translate_text("COFFEE")
+            assert result == "COFFEE"
 
 
 class TestPaddleOCRBackend:

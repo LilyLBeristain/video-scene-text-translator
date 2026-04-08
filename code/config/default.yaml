@@ -44,7 +44,7 @@ detection:
 translation:
   source_lang: "en"
   target_lang: "es"
-  backend: "googletrans"
+  backend: "deep-translator"
   api_key: null
 
 frontalization:
@@ -66,3 +66,15 @@ text_editor:
   backend: "placeholder"
   model_path: null
   device: "cpu"
+  # AnyText2 Gradio server (only used when backend == "anytext2")
+  server_url: null
+  server_timeout: 120
+  anytext2_ddim_steps: 20
+  anytext2_cfg_scale: 7.5
+  anytext2_strength: 1.0
+  anytext2_img_count: 1
+  # Minimum generation size: upscale small ROIs so max(h,w) >= this value (256–1024)
+  anytext2_min_gen_size: 512
+  # ROI context expansion: include real scene pixels around text for better AnyText2 quality.
+  # 0.0 = tight crop (default), 0.3 = 30% margin on each side.
+  roi_context_expansion: 0.0

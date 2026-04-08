@@ -23,13 +23,9 @@ class ReferenceSelector:
         self._translator = None  # Lazy-init translator
 
     def _init_translator(self):
-        if self._translator is None:
-            if self.translation_config.backend == "googletrans":
-                from googletrans import Translator
-                self._translator = Translator()
-            else:
-                from google.cloud import translate_v2 as translate
-                self._translator = translate.Client()
+        if self._translator is None and self.translation_config.backend == "google-cloud":
+            from google.cloud import translate_v2 as translate
+            self._translator = translate.Client()
 
     def translate_text(self, text: str) -> str:
         """Translate text from source_lang to target_lang."""
@@ -37,19 +33,16 @@ class ReferenceSelector:
             return text
 
         self._init_translator()
+        src = self.translation_config.source_lang
+        tgt = self.translation_config.target_lang
         try:
-            if self.translation_config.backend == "googletrans":
-                result = self._translator.translate(
-                    text,
-                    src=self.translation_config.source_lang,
-                    dest=self.translation_config.target_lang,
-                )
-                return result.text
+            if self.translation_config.backend == "deep-translator":
+                return self._translate_deep(text, src, tgt)
 
             result = self._translator.translate(
                 text,
-                source_language=self.translation_config.source_lang,
-                target_language=self.translation_config.target_lang,
+                source_language=src,
+                target_language=tgt,
             )
             return result["translatedText"]
         except Exception as exc:
@@ -60,6 +53,20 @@ class ReferenceSelector:
                 exc,
             )
             return text
+
+    def _translate_deep(self, text: str, src: str, tgt: str) -> str:
+        """Translate using deep-translator with MyMemory fallback."""
+        from deep_translator import GoogleTranslator, MyMemoryTranslator
+
+        try:
+            return GoogleTranslator(source=src, target=tgt).translate(text)
+        except Exception as exc:
+            logger.debug(
+                "GoogleTranslator failed for '%s', trying MyMemory: %s",
+                text,
+                exc,
+            )
+            return MyMemoryTranslator(source=src, target=tgt).translate(text)
 
     def select_reference_frames(
         self,

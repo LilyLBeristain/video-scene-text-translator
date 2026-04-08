@@ -38,8 +38,8 @@ class DetectionConfig:
     # "full_propagation": propagate reference quad to ALL frames, overwriting OCR quads
     flow_fill_strategy: str = "gaps_only"
     # CoTracker3 settings (only used when optical_flow_method == "cotracker")
-    cotracker_checkpoint: str = "third_party/co-tracker/checkpoints/scaled_offline.pth"
-    cotracker_online_checkpoint: str = "third_party/co-tracker/checkpoints/scaled_online.pth"
+    cotracker_checkpoint: str = "../third_party/co-tracker/checkpoints/scaled_offline.pth"
+    cotracker_online_checkpoint: str = "../third_party/co-tracker/checkpoints/scaled_online.pth"
     cotracker_window_len: int = 60
     cotracker_online_window_len: int = 16
     farneback_pyr_scale: float = 0.5
@@ -58,7 +58,7 @@ class DetectionConfig:
 class TranslationConfig:
     source_lang: str = "en"
     target_lang: str = "es"
-    backend: str = "googletrans"  # "googletrans" or "google-cloud"
+    backend: str = "deep-translator"  # "deep-translator" or "google-cloud"
     api_key: str | None = None
 
 
@@ -115,9 +115,26 @@ class RevertConfig:
 
 @dataclass
 class TextEditorConfig:
-    backend: str = "placeholder"  # "placeholder" or "stage_a"
+    backend: str = "placeholder"  # "placeholder", "anytext2", or "stage_a"
     model_path: str | None = None
     device: str = "cpu"
+    # AnyText2 Gradio server settings (only used when backend == "anytext2")
+    server_url: str | None = None  # e.g. "http://localhost:45843/"
+    server_timeout: int = 120  # seconds to wait for Gradio response
+    anytext2_ddim_steps: int = 20
+    anytext2_cfg_scale: float = 7.5
+    anytext2_strength: float = 1.0
+    anytext2_img_count: int = 1  # number of result images (1 = fastest)
+    # Minimum generation size: upscale small ROIs so max(h,w) >= this value.
+    # AnyText2 was trained at 512×512 — smaller inputs degrade quality.
+    # Range: 256–1024. Both dimensions are also padded to multiples of 64.
+    anytext2_min_gen_size: int = 512
+    # ROI context expansion: fraction of each dimension to add as margin
+    # around the text region, filled with real scene pixels from the frame.
+    # Gives AnyText2 visual context for better style matching.
+    # 0.0 = no expansion (current behavior), 0.3 = 30% margin on each side.
+    roi_context_expansion: float = 0.0
+
 
 @dataclass
 class TPMDataGenConfig:
@@ -195,4 +212,8 @@ class PipelineConfig:
             errors.append("ref_sharpness_top_k must be >= 1")
         if self.detection.frame_sample_rate < 1:
             errors.append("frame_sample_rate must be >= 1")
+        if self.text_editor.backend == "anytext2" and not self.text_editor.server_url:
+            errors.append(
+                "text_editor.server_url is required when backend is 'anytext2'"
+            )
         return errors

@@ -10,6 +10,13 @@ from src.config import PipelineConfig
 from src.data_types import Quad, TextDetection, TextTrack
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow")
+    config.addinivalue_line("markers", "gpu: marks tests requiring CUDA GPU")
+    config.addinivalue_line("markers", "network: marks tests requiring network access")
+
+
 @pytest.fixture
 def synthetic_frame():
     """640x480 BGR frame with a white rectangle containing black text."""
