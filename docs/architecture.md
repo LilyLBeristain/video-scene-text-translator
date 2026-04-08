@@ -19,7 +19,7 @@
 | `s1_detection/streaming_tracker.py` | Streaming gap-filler: per-track seek + pairwise or CoTracker online flow | In: tracks + VideoReader → Out: tracks with filled gaps |
 | `s2_frontalization.py` | Homography computation: frame quad → canonical frontal rectangle | In: TextTrack + frames → Out: H stored on TextDetection |
 | `s3_text_editing.py` | Stage A model wrapper via BaseTextEditor | In: reference ROI + target_text → Out: edited ROI |
-| `s4_propagation.py` | YCrCb luminance histogram matching + feathered alpha mask creation | In: edited ROI + frame ROIs → Out: dict[frame_idx → PropagatedROI] |
+| `s4_propagation/` | LCM (per-pixel ratio map from inpainted backgrounds, when available) or YCrCb luminance histogram matching as fallback, + feathered alpha mask creation. BPN integration in progress. | In: edited ROI + frame ROIs (+ inpainted backgrounds when available) → Out: dict[frame_idx → PropagatedROI] |
 | `s5_revert.py` | Inverse homography warp + alpha blending + compositing | In: PropagatedROIs + frames → Out: final output frames |
 | `base_text_editor.py` | ABC for Stage A models (edit_text, load_model) | Subclassed by concrete model backends |
 | `placeholder_editor.py` | Pillow-based placeholder for pipeline testing (supports accented chars) | Implements BaseTextEditor |
