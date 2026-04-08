@@ -23,9 +23,10 @@ from src.models.base_text_editor import BaseTextEditor
 
 logger = logging.getLogger(__name__)
 
-# Clamp ROI dimensions to AnyText2's accepted range.
-_MIN_DIM = 256
-_MAX_DIM = 1024
+# AnyText2 dimension constraints.
+_MIN_DIM = 256   # Hard minimum accepted by the model
+_MAX_DIM = 1024  # Hard maximum accepted by the model
+_ALIGN = 64      # Dimensions must be multiples of this (SD VAE + U-Net)
 
 
 class AnyText2Editor(BaseTextEditor):
@@ -100,25 +101,28 @@ class AnyText2Editor(BaseTextEditor):
             logger.warning("AnyText2Editor: ROI too small (%dx%d), returning as-is", w_orig, h_orig)
             return roi_image
 
-        # Resize if outside AnyText2's accepted range
-        roi_resized = self._clamp_dimensions(roi_image)
-        h_send, w_send = roi_resized.shape[:2]
+        # Upscale, 64-align, and pad — returns prepared image + content region
+        min_gen = self.config.anytext2_min_gen_size
+        roi_prepared, content_rect = self._prepare_roi(roi_image, min_gen)
+        h_send, w_send = roi_prepared.shape[:2]
+        ct, cb, cl, cr = content_rect  # top, bottom, left, right
 
-        # Extract dominant text color from the ROI
-        text_color = self._extract_text_color(roi_resized)
+        # Extract dominant text color from the original (non-padded) content
+        text_color = self._extract_text_color(roi_image)
 
         # Save images to temp files (Gradio API needs file paths)
         with tempfile.TemporaryDirectory() as tmpdir:
             ori_path = str(Path(tmpdir) / "ori.png")
             mask_path = str(Path(tmpdir) / "mask.png")
 
-            if not cv2.imwrite(ori_path, roi_resized):
+            if not cv2.imwrite(ori_path, roi_prepared):
                 raise RuntimeError(f"Failed to write temp ROI image to {ori_path}")
 
             # RGBA mask: alpha channel marks the edit region.
             # AnyText2 extracts the mask from layers[0][..., 3:] (alpha).
+            # Only mark the actual content rectangle — padding stays anchored.
             mask = np.zeros((h_send, w_send, 4), dtype=np.uint8)
-            mask[..., 3] = 255  # alpha=255 → entire ROI is the edit region
+            mask[ct:cb, cl:cr, 3] = 255
             if not cv2.imwrite(mask_path, mask):
                 raise RuntimeError(f"Failed to write temp mask image to {mask_path}")
 
@@ -126,13 +130,14 @@ class AnyText2Editor(BaseTextEditor):
                 ori_path, mask_path, target_text, text_color, w_send, h_send,
             )
 
-        # Resize result back to original dimensions if we scaled
-        if result_image.shape[:2] != (h_orig, w_orig):
-            result_image = cv2.resize(
-                result_image, (w_orig, h_orig), interpolation=cv2.INTER_LANCZOS4,
+        # Crop out the content region (strip padding), then resize to original
+        result_content = result_image[ct:cb, cl:cr]
+        if result_content.shape[:2] != (h_orig, w_orig):
+            result_content = cv2.resize(
+                result_content, (w_orig, h_orig), interpolation=cv2.INTER_LANCZOS4,
             )
 
-        return result_image
+        return result_content
 
     # ------------------------------------------------------------------
     # Internals
@@ -279,61 +284,99 @@ class AnyText2Editor(BaseTextEditor):
         return img
 
     @staticmethod
-    def _clamp_dimensions(image: np.ndarray) -> np.ndarray:
-        """Resize image so both dimensions are within [256, 1024].
+    def _prepare_roi(
+        image: np.ndarray, min_gen_size: int = 512,
+    ) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+        """Upscale, 64-align, and pad an ROI for AnyText2.
 
-        Uses uniform scaling to preserve aspect ratio.  When the aspect
-        ratio is too extreme for both axes to fit within [256, 1024]
-        simultaneously, the shorter axis is padded to 256 with the
-        border color rather than stretched (which would distort glyphs).
+        Steps:
+            1. **Downscale** if ``max(h, w) > 1024`` (AnyText2 hard max).
+            2. **Upscale** if ``max(h, w) < min_gen_size`` so the longest
+               side reaches *min_gen_size* (quality floor, default 512).
+            3. **Pad** both dimensions UP to the next multiple of 64 using
+               ``BORDER_REPLICATE``.  This prevents AnyText2's server-side
+               ``resize_image`` from cropping content pixels.
+
+        Args:
+            image: BGR input ROI (H × W × 3, uint8).
+            min_gen_size: Target minimum for ``max(h, w)``.  Clamped to
+                [``_MIN_DIM``, ``_MAX_DIM``] internally.
 
         Returns:
-            Resized (and possibly padded) image.
+            ``(prepared_image, content_rect)`` where *content_rect* is
+            ``(top, bottom, left, right)`` — the slice coordinates of the
+            original content within the padded image.  Use this to build
+            a localized mask and to crop the result.
         """
+        min_gen_size = max(_MIN_DIM, min(min_gen_size, _MAX_DIM))
         h, w = image.shape[:2]
 
-        # Uniform scale: bring the larger dimension into bounds first
+        # 1. Downscale if above hard max
         scale = 1.0
         if max(h, w) > _MAX_DIM:
             scale = _MAX_DIM / max(h, w)
 
+        # 2. Upscale if below quality floor
+        if max(h, w) * scale < min_gen_size:
+            scale = min_gen_size / max(h, w)
+
         new_w = int(round(w * scale))
         new_h = int(round(h * scale))
 
-        # If the shorter side is still below _MIN_DIM after uniform scale,
-        # pad instead of stretching to preserve aspect ratio.
-        pad_w = max(0, _MIN_DIM - new_w)
-        pad_h = max(0, _MIN_DIM - new_h)
-
-        if new_w == w and new_h == h and pad_w == 0 and pad_h == 0:
-            return image
-
-        # Resize uniformly
+        # Resize if scale changed
         if new_w != w or new_h != h:
             image = cv2.resize(
                 image, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4,
             )
+            logger.debug(
+                "Scaled ROI from %dx%d to %dx%d (scale=%.3f)",
+                w, h, new_w, new_h, scale,
+            )
 
-        # Pad short axis with border color (replicate edge pixels)
+        # 3. Pad to next multiple of _ALIGN (64) on each axis
+        def _pad_to_align(dim: int) -> int:
+            remainder = dim % _ALIGN
+            return (_ALIGN - remainder) if remainder else 0
+
+        pad_w = _pad_to_align(new_w)
+        pad_h = _pad_to_align(new_h)
+
+        # Also ensure both axes meet _MIN_DIM after alignment.
+        # NOTE: This preserves 64-alignment because _MIN_DIM (256) is
+        # itself a multiple of _ALIGN (64).  If either constant changes,
+        # verify that _MIN_DIM % _ALIGN == 0 still holds.
+        aligned_w = new_w + pad_w
+        aligned_h = new_h + pad_h
+        if aligned_w < _MIN_DIM:
+            pad_w += _MIN_DIM - aligned_w
+        if aligned_h < _MIN_DIM:
+            pad_h += _MIN_DIM - aligned_h
+
+        # Content rectangle within the padded image
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+
         if pad_w > 0 or pad_h > 0:
-            pad_left = pad_w // 2
-            pad_right = pad_w - pad_left
-            pad_top = pad_h // 2
-            pad_bottom = pad_h - pad_top
             image = cv2.copyMakeBorder(
                 image, pad_top, pad_bottom, pad_left, pad_right,
                 cv2.BORDER_REPLICATE,
             )
             logger.debug(
-                "Padded ROI by (%d,%d,%d,%d) to reach minimum dimensions",
+                "Padded ROI by (top=%d, bottom=%d, left=%d, right=%d) "
+                "to %dx%d (64-aligned)",
                 pad_top, pad_bottom, pad_left, pad_right,
+                image.shape[1], image.shape[0],
             )
 
+        content_rect = (pad_top, pad_top + new_h, pad_left, pad_left + new_w)
+
         logger.debug(
-            "Clamped ROI from %dx%d to %dx%d", w, h,
-            image.shape[1], image.shape[0],
+            "Prepared ROI: original %dx%d → final %dx%d, content_rect=%s",
+            w, h, image.shape[1], image.shape[0], content_rect,
         )
-        return image
+        return image, content_rect
 
     @staticmethod
     def _extract_text_color(image: np.ndarray) -> str:

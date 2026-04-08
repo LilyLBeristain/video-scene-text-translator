@@ -73,3 +73,5 @@ text_editor:
   anytext2_cfg_scale: 7.5
   anytext2_strength: 1.0
   anytext2_img_count: 1
+  # Minimum generation size: upscale small ROIs so max(h,w) >= this value (256–1024)
+  anytext2_min_gen_size: 512

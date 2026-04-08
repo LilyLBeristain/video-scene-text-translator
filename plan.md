@@ -1,87 +1,79 @@
-# Plan: AnyText2 Integration via Gradio API
+# Plan: AnyText2 ROI Resolution & Mask Fix
 
 ## Goal
-Integrate AnyText2 as a real Stage A text editing model, replacing the placeholder editor. AnyText2 runs as a separate Gradio server (managed by Hebin); our pipeline calls it via HTTP to perform style-preserving cross-language scene text replacement.
+Improve AnyText2 output quality by (1) upscaling small ROIs to 512+ generation resolution with 64-pixel alignment, and (2) restricting the edit mask to the actual text region instead of the full padded image. Eliminates black corner artifacts and low-resolution text.
 
 ## Approach
-Create an `AnyText2Editor` subclass of `BaseTextEditor` that communicates with AnyText2's Gradio server via `gradio_client`. The editor:
-1. Takes a frontalized ROI image + target text from S3
-2. Saves the ROI to a temp file (Gradio API needs file paths)
-3. Generates a full-image mask (entire ROI is the edit region)
-4. Calls `/process_1` (edit tab) with font set to "Mimic From Image" for style preservation
-5. Downloads the first result image from the gallery response
-6. Returns it as a BGR numpy array matching the original ROI dimensions
+All changes stay within `anytext2_editor.py` + config — no pipeline or S2 changes needed.
+
+**Problem diagnosis:**
+- S2 frontalizes text quads into tight ROI crops (e.g., 500×80, 150×40)
+- `_clamp_dimensions` pads short axes to 256 with `BORDER_REPLICATE`, but never upscales
+- AnyText2 server internally crops to multiples of 64 (`w - (w%64)`) — we don't account for this, silently losing content pixels
+- The mask covers 100% of the image (including padding) → AnyText2 tries to regenerate padding regions → black corner artifacts
+- AnyText2's training resolution is 512×512 — sending 256×256 is below the sweet spot
+
+**Fix (three parts, all in `anytext2_editor.py`):**
+
+1. **Upscale small ROIs**: If `max(h, w) < min_gen_size` (default 512), uniformly upscale so the longest side reaches `min_gen_size`. This puts the generation resolution in AnyText2's sweet spot.
+
+2. **64-pixel alignment via padding (not cropping)**: After upscaling, round both dimensions UP to the next multiple of 64 using `BORDER_REPLICATE` padding. This replaces the blunt "pad to 256" approach and prevents AnyText2's server-side crop from silently losing content pixels.
+
+3. **Localized mask**: Track padding offsets from step 2. Set mask `alpha=255` only within the original content rectangle; `alpha=0` in padded regions. AnyText2 treats the padding as anchored context and only edits the text area — fixing the black corner artifacts.
+
+**Example flow (150×40 ROI → "GUARDIA"):**
+```
+Input ROI:     150×40
+Upscale (×3.41): 512×137
+64-align pad:  512×256  (137→192 for 64-align, 192→256 for _MIN_DIM)
+               (pad 59 top, 60 bottom)
+
+Mask:          512×256
+               [alpha=0  ] ← 59px top padding (anchored)
+               [alpha=255] ← 137px content (edit region)
+               [alpha=0  ] ← 60px bottom padding (anchored)
+
+AnyText2 server: resize_image(512×256, max_length=1024)
+  → 512-(512%64)=512, 256-(256%64)=256 → 512×256 (no crop! dimensions preserved)
+
+Result:        512×256 → crop out padding → 512×137 → downscale to 150×40
+```
 
 **Key decisions:**
-- **Gradio client over raw HTTP**: `gradio_client` handles file upload, serialization, and result download. Less code, less bugs.
-- **Full-image mask**: Since ROIs are already tight frontalized text crops, mask the entire image. Simpler than threshold-based text detection. Can refine later if background artifacts appear.
-- **`img_count=1`**: Only generate one result to minimize latency (~1.2s instead of ~4.8s for 4 images).
-- **Configurable server URL**: In `TextEditorConfig` so any teammate can point to their own server.
-- **Connection validation**: `AnyText2Editor` checks server reachability on init and raises a clear error if the server is down.
-- **Timeout handling**: Gradio calls can hang if the GPU is busy. Add a configurable timeout (default 60s).
-- **Lazy init**: Follow existing pattern — don't connect until first `edit_text()` call.
-
-**AnyText2 `/process_1` API mapping:**
-
-| Our concept | API parameter | Value |
-|---|---|---|
-| Original image | `ori_img` | ROI saved as temp PNG |
-| Image + mask | `ref_img` | `{background: ROI, layers: [white_mask]}` |
-| Target text | `text_prompt` | e.g. `"咖啡"` |
-| Scene description | `img_prompt` | `"Text with some background"` |
-| Font style | `f1` | `"Mimic From Image(模仿图中字体)"` |
-| Text color | `c1` | Auto-extracted from ROI border pixels |
-| Image count | `img_count` | `1` |
-| Dimensions | `w`, `h` | Match ROI dimensions (clamped to 256-1024) |
-| Other fonts | `f2-f5`, `m2-m5`, `c2-c5` | Defaults (unused) |
-| Model path | `base_model_path` | `""` (use server default) |
-| LoRA | `lora_path_ratio` | `""` (none) |
+- **Upscale target 512 (not 768/1024)**: 512 is AnyText2's default training resolution. Higher values have diminishing returns and increase latency quadratically.
+- **Pad to 64-multiples (not crop)**: AnyText2 server crops to 64-multiples. By pre-aligning via padding, we ensure zero content pixel loss and our mask stays in sync with what the server actually processes.
+- **BORDER_REPLICATE for padding**: Same as before — replicates edge pixels, giving AnyText2 a plausible "background" in the anchored region.
+- **Configurable `anytext2_min_gen_size`**: Allows tuning per deployment. Default 512, range 256–1024.
+- **Return value crops padding before downscale**: The result from AnyText2 includes the padded region (which should be unchanged). We crop to the content rectangle first, then downscale to original dimensions. This avoids blending padding artifacts into the final output.
 
 ## Files to Change
-- [ ] `code/src/config.py` — Add `server_url`, `server_timeout`, `anytext2_ddim_steps`, `anytext2_cfg_scale`, `anytext2_strength` fields to `TextEditorConfig`
-- [ ] (new) `code/src/models/anytext2_editor.py` — `AnyText2Editor(BaseTextEditor)`: Gradio client wrapper, mask generation, color extraction, temp file management
-- [ ] `code/src/stages/s3_text_editing.py` — Register `"anytext2"` backend in `_init_editor()`, pass config to editor
-- [ ] `code/config/default.yaml` — Add `server_url: null` and AnyText2 params to `text_editor` section
-- [ ] `code/config/adv.yaml` — Same as default.yaml for text_editor section
-- [ ] (new) `code/tests/test_anytext2_editor.py` — Unit tests with mocked Gradio client (no server needed)
-- [ ] (new) `third_party/install_anytext2.sh` — Setup instructions: clone repo, create conda env, download weights, run server
-- [ ] `code/requirements/base.txt` — Add `gradio_client` dependency
+- [ ] `code/src/config.py` — Add `anytext2_min_gen_size: int = 512` to `TextEditorConfig`
+- [ ] `code/src/models/anytext2_editor.py` — Refactor `_clamp_dimensions` → `_prepare_roi` (upscale + 64-align + return padding offsets); update mask creation to be localized; crop result before downscale
+- [ ] `code/config/default.yaml` — Add `anytext2_min_gen_size: 512` to `text_editor` section
+- [ ] `code/config/adv.yaml` — Same
+- [ ] `code/tests/test_anytext2_editor.py` — Update existing clamp tests, add tests for upscale, 64-alignment, localized mask, result cropping
 
 ## Risks
-- **Server availability**: AnyText2 server must be running for the editor to work. Pipeline will raise a clear error if it's down, and falls back to placeholder if configured.
-- **Gradio API stability**: Gradio client versions can be finicky. Pin `gradio_client` version to match server's Gradio 5.12.0.
-- **Image quality**: AnyText2's editing mode is under-evaluated in the paper. Quality on our specific ROIs (frontalized, cropped) is unknown until we test. Full-mask approach may cause background regeneration artifacts.
-- **Latency**: ~1.2s per text track. Acceptable for reference-frame-only editing but would be a bottleneck if ever applied per-frame.
-- **Network dependency**: Server is on `109.231.106.68` (lab network). Must be reachable from the machine running the pipeline.
-- **ROI size constraints**: AnyText2 accepts 256-1024px. Very small or very large ROIs need resizing, which may affect quality.
-- **Color extraction**: Auto-extracting text color from ROI border pixels is approximate. May not match AnyText2's expected format.
+- **VRAM increase**: 512×512 uses ~4× compute vs 256×256. Should be fine on a 12GB+ GPU with `img_count=1`, but worth monitoring.
+- **Latency**: ~1.5–2s per track instead of ~1.2s. Acceptable for reference-frame-only editing.
+- **Padding as context quality**: `BORDER_REPLICATE` padding is still artificial. It's better than masking it for edit, but AnyText2 may still produce minor artifacts at the content/padding boundary. **Future improvement (Option C)**: expand the ROI in S2 to include real scene context from the original frame before frontalization. This would require S2 pipeline changes and is deferred.
+- **Aspect ratio extremes**: Very wide text (e.g., 1000×30) upscaled → 512×15 → padded to 512×64. The content strip is thin relative to padding. Quality may still be limited for extreme aspect ratios.
+- **Double-resize for upscaled ROIs**: Upscale (Lanczos) → AnyText2 generates → crop → downscale (Lanczos). Two resampling passes. Acceptable for diffusion model output which isn't pixel-perfect anyway.
 
 ## Done When
-- [ ] `AnyText2Editor.edit_text(roi, target_text)` returns a style-preserved edited ROI when server is running
-- [ ] Pipeline runs end-to-end with `text_editor.backend: "anytext2"` and produces output video with translated text
-- [ ] Editor raises clear error message when server is unreachable
-- [ ] Editor handles edge cases: empty ROI, very small ROI (<256px), very large ROI (>1024px)
+- [ ] Small ROIs (e.g., 150×40) are upscaled to 512+ before hitting AnyText2
+- [ ] All dimensions sent to AnyText2 are multiples of 64 (no server-side pixel loss)
+- [ ] Mask covers only the text content region, not padding — no more black corner artifacts
+- [ ] Result is cropped to content region before downscaling to original ROI dimensions
+- [ ] Config field `anytext2_min_gen_size` is respected and documented in YAML files
 - [ ] All existing tests pass (zero regressions)
-- [ ] New tests cover: mock Gradio call, mask generation, color extraction, error handling, ROI resizing
-- [ ] Code review approved (@reviewer)
-- [ ] Changes committed as atomic commits
+- [ ] New tests cover: upscale path, 64-alignment, localized mask shape, result crop, edge cases (already-large ROIs, extreme aspect ratios)
 
 ## Progress
-- [x] Step 1: Add AnyText2 config fields to `TextEditorConfig` in `config.py`
-- [x] Step 2: Implement `AnyText2Editor` in `code/src/models/anytext2_editor.py`
-- [x] Step 3: Register `"anytext2"` backend in `s3_text_editing.py`
-- [x] Step 4: Update `default.yaml` and `adv.yaml` with new text_editor fields
-- [x] Step 5: Add `gradio_client` to `requirements/base.txt`
-- [x] Step 6: Write unit tests with mocked Gradio client (15 tests, all passing)
-- [x] Step 7: Write `third_party/install_anytext2.sh` setup script
-- [x] Step 8: E2E integration test on remote GPU machine
-  - [x] 8a: Create venv with `uv`, install PyTorch (CUDA 13.0)
-  - [x] 8b: Install base requirements + EasyOCR
-  - [x] 8c: Install PaddlePaddle GPU + PaddleOCR
-  - [x] 8d: Clone CoTracker (HTTPS), install, download checkpoints
-  - [x] 8e: Install gradio_client, verify AnyText2 server reachability
-  - [x] 8f: Run pytest to verify setup (160 passing)
-  - [x] 8g: Generated synthetic test video + downloaded Pexels stock video
-  - [x] 8h: Pipeline ran end-to-end with adv.yaml — all 5 stages completed
-  - Fixes applied during e2e: RGBA mask, quoted text_prompt, submit/result API, gallery parse, CoTracker relative paths
-- [x] Step 9: Update CHANGELOG.md with AnyText2 integration entry
+- [x] Step 1: Add `anytext2_min_gen_size` config field
+- [x] Step 2: Refactor `_clamp_dimensions` → `_prepare_roi` (upscale + 64-align + return offsets)
+- [x] Step 3: Update mask creation to use localized mask based on padding offsets
+- [x] Step 4: Crop AnyText2 result to content region before downscaling
+- [x] Step 5: Update `default.yaml` and `adv.yaml`
+- [x] Step 6: Update tests (fix existing clamp tests, add new coverage)
+- [x] Step 7: Code review — fixed misleading mock size, added _MIN_DIM invariant comment, explicit fixture config

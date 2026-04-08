@@ -95,6 +95,10 @@ class TextEditorConfig:
     anytext2_cfg_scale: float = 7.5
     anytext2_strength: float = 1.0
     anytext2_img_count: int = 1  # number of result images (1 = fastest)
+    # Minimum generation size: upscale small ROIs so max(h,w) >= this value.
+    # AnyText2 was trained at 512×512 — smaller inputs degrade quality.
+    # Range: 256–1024. Both dimensions are also padded to multiples of 64.
+    anytext2_min_gen_size: int = 512
 
 
 @dataclass
