@@ -14,14 +14,26 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from src.config import TextEditorConfig
+from src.models.anytext2_mask import (
+    compute_adaptive_mask_rect,
+    restore_middle_strip,
+)
 from src.models.base_text_editor import BaseTextEditor
 
+if TYPE_CHECKING:
+    from src.stages.s4_propagation.base_inpainter import BaseBackgroundInpainter
+
 logger = logging.getLogger(__name__)
+
+# Feather width at the middle-strip boundary (pixels). Small fixed value —
+# enough to hide the SRNet seam, small enough to not bleed into new text.
+_ADAPTIVE_STRIP_FEATHER_PX = 3
 
 # AnyText2 dimension constraints.
 MIN_DIM = 256   # Hard minimum accepted by the model
@@ -38,9 +50,18 @@ class AnyText2Editor(BaseTextEditor):
         edited = editor.edit_text(roi_image, "PELIGRO")
     """
 
-    def __init__(self, config: TextEditorConfig):
+    def __init__(
+        self,
+        config: TextEditorConfig,
+        inpainter: BaseBackgroundInpainter | None = None,
+    ):
         self.config = config
         self._client = None  # Lazy-init gradio Client
+        # Optional inpainter for adaptive mask sizing. When present and
+        # config.anytext2_adaptive_mask is True, long-to-short cases
+        # pre-inpaint the canonical and shrink the mask. See plan.md.
+        self._inpainter = inpainter
+        self._warned_no_inpainter = False
 
     # ------------------------------------------------------------------
     # Lazy initialisation
@@ -111,6 +132,23 @@ class AnyText2Editor(BaseTextEditor):
             logger.warning("AnyText2Editor: ROI too small (%dx%d), returning as-is", w_orig, h_orig)
             return roi_image
 
+        # Extract dominant text color from the ORIGINAL roi_image BEFORE
+        # the adaptive mask flow rewrites any pixels — otherwise we'd
+        # read the inpainted background color.
+        if edit_region is not None:
+            et, eb, el, er = edit_region
+            color_region = roi_image[et:eb, el:er]
+        else:
+            color_region = roi_image
+        text_color = self._extract_text_color(color_region)
+
+        # Apply adaptive mask sizing if configured + inpainter available.
+        # May rewrite roi_image and narrow edit_region to a shrunk, centered
+        # strip inside the canonical text area. Silent no-op otherwise.
+        roi_image, edit_region = self._apply_adaptive_mask(
+            roi_image, target_text, edit_region,
+        )
+
         # Upscale, 64-align, and pad — returns prepared image + content region
         min_gen = self.config.anytext2_min_gen_size
         roi_prepared, content_rect, scale = self._prepare_roi(roi_image, min_gen)
@@ -134,14 +172,6 @@ class AnyText2Editor(BaseTextEditor):
             mask_rect = content_rect
 
         mt, mb, ml, mr = mask_rect
-
-        # Extract dominant text color from the text area only
-        if edit_region is not None:
-            et, eb, el, er = edit_region
-            color_region = roi_image[et:eb, el:er]
-        else:
-            color_region = roi_image
-        text_color = self._extract_text_color(color_region)
 
         # Save images to temp files (Gradio API needs file paths)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,6 +204,103 @@ class AnyText2Editor(BaseTextEditor):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _apply_adaptive_mask(
+        self,
+        roi_image: np.ndarray,
+        target_text: str,
+        edit_region: tuple[int, int, int, int] | None,
+    ) -> tuple[np.ndarray, tuple[int, int, int, int] | None]:
+        """Shrink the mask + pre-inpaint source text for long-to-short cases.
+
+        When the target text's natural aspect ratio is much narrower than
+        the canonical text area, this:
+
+        1. Extracts the canonical region (either the whole ROI or the inner
+           sub-rect marked by *edit_region*)
+        2. Calls the configured inpainter to erase source text
+        3. Restores a centered middle strip of original pixels matching the
+           target text's natural aspect ratio, so AnyText2 still sees a
+           valid "text to replace" anchor inside the mask
+        4. Pastes the hybrid canonical back into *roi_image* and narrows
+           *edit_region* to the new (shrunk) mask rectangle
+
+        Returns the (possibly modified) *roi_image* and *edit_region*. If
+        the adaptive flow should be skipped (config off, no inpainter,
+        within tolerance, target wider than source, inpainter failure),
+        returns the inputs unchanged.
+        """
+        if not self.config.anytext2_adaptive_mask:
+            return roi_image, edit_region
+
+        if self._inpainter is None:
+            if not self._warned_no_inpainter:
+                logger.warning(
+                    "AnyText2 adaptive_mask is enabled but no inpainter "
+                    "was provided. Long-to-short translations may produce "
+                    "gibberish fill. Configure propagation.inpainter_backend "
+                    "to enable the adaptive flow."
+                )
+                self._warned_no_inpainter = True
+            return roi_image, edit_region
+
+        # Identify the canonical region within roi_image
+        if edit_region is not None:
+            et, eb, el, er = edit_region
+            canonical = roi_image[et:eb, el:er]
+        else:
+            et, eb = 0, roi_image.shape[0]
+            el, er = 0, roi_image.shape[1]
+            canonical = roi_image
+
+        canonical_h, canonical_w = canonical.shape[:2]
+        if canonical_h <= 0 or canonical_w <= 0:
+            return roi_image, edit_region
+
+        # Pure-logic computation — may return None to signal skip
+        adaptive_rect = compute_adaptive_mask_rect(
+            canonical_w=canonical_w,
+            canonical_h=canonical_h,
+            target_text=target_text,
+            tolerance=self.config.anytext2_mask_aspect_tolerance,
+            min_ratio=self.config.anytext2_mask_min_ratio,
+        )
+        if adaptive_rect is None:
+            return roi_image, edit_region
+
+        # Inpaint the entire canonical via the configured backend
+        try:
+            clean_canonical = self._inpainter.inpaint(canonical)
+        except Exception as exc:  # noqa: BLE001 - log + fall back
+            logger.warning(
+                "AnyText2 adaptive_mask: inpainter failed (%s); falling "
+                "back to non-adaptive mask for this track.",
+                exc,
+            )
+            return roi_image, edit_region
+
+        # Restore the middle strip (original pixels under the new mask)
+        hybrid_canonical = restore_middle_strip(
+            inpainted=clean_canonical,
+            original=canonical,
+            mask_rect=adaptive_rect,
+            feather_px=_ADAPTIVE_STRIP_FEATHER_PX,
+        )
+
+        # Paste hybrid back into a copy of roi_image (don't mutate caller)
+        new_roi = roi_image.copy()
+        new_roi[et:eb, el:er] = hybrid_canonical
+
+        # Translate adaptive_rect from canonical coords to roi_image coords
+        _, _, strip_l, strip_r = adaptive_rect
+        new_edit_region = (et, eb, el + strip_l, el + strip_r)
+
+        logger.debug(
+            "AnyText2 adaptive mask triggered: canonical %dx%d → mask "
+            "width %d (centered), target_text=%r",
+            canonical_w, canonical_h, strip_r - strip_l, target_text,
+        )
+        return new_roi, new_edit_region
 
     def _call_server(
         self,

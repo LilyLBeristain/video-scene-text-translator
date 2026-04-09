@@ -91,8 +91,60 @@ def _expanded_warp(
 
 class TextEditingStage:
     def __init__(self, config: PipelineConfig):
+        # Keep the full pipeline config: we need propagation.inpainter_*
+        # to lazy-load an inpainter for AnyText2's adaptive mask flow.
+        self._pipeline_config = config
         self.config = config.text_editor
         self._editor: BaseTextEditor | None = None
+        self._s3_inpainter = None  # lazy, AnyText2 backend only
+
+    def _get_inpainter(self):
+        """Lazy-load an inpainter for AnyText2 adaptive mask sizing.
+
+        Reuses the SAME backend config as S4 propagation
+        (`propagation.inpainter_backend` / `inpainter_checkpoint_path`)
+        but instantiates a **separate** instance — S3 and S4 stay
+        decoupled per plan.md D5. Returns None when no backend is
+        configured, in which case AnyText2 falls back to non-adaptive
+        mask (see `AnyText2Editor._apply_adaptive_mask`).
+
+        Note: S3's error handling is deliberately more permissive than
+        S4's. S4's `_get_inpainter` raises on unknown backends because
+        LCM is the core propagation path there. In S3 the inpainter is
+        only an optional quality optimization for long-to-short
+        translations — a misconfigured or missing inpainter should
+        degrade gracefully back to the pre-adaptive behaviour instead
+        of crashing the pipeline. Hence warn + return None.
+        """
+        if self._s3_inpainter is not None:
+            return self._s3_inpainter
+        prop = self._pipeline_config.propagation
+        backend = prop.inpainter_backend
+        if backend in (None, "", "none"):
+            return None
+        if backend == "srnet":
+            if not prop.inpainter_checkpoint_path:
+                logger.warning(
+                    "S3: anytext2 adaptive mask requested srnet inpainter "
+                    "but propagation.inpainter_checkpoint_path is empty; "
+                    "falling back to non-adaptive mask."
+                )
+                return None
+            from src.stages.s4_propagation.srnet_inpainter import SRNetInpainter
+            logger.info(
+                "S3: loading SRNet inpainter for AnyText2 adaptive mask "
+                "from %s", prop.inpainter_checkpoint_path,
+            )
+            self._s3_inpainter = SRNetInpainter(
+                checkpoint_path=prop.inpainter_checkpoint_path,
+                device=prop.inpainter_device,
+            )
+            return self._s3_inpainter
+        logger.warning(
+            "S3: unknown inpainter_backend %r; AnyText2 adaptive mask "
+            "will fall back to non-adaptive.", backend,
+        )
+        return None
 
     def _init_editor(self) -> BaseTextEditor:
         if self._editor is None:
@@ -100,7 +152,10 @@ class TextEditingStage:
                 self._editor = PlaceholderTextEditor()
             elif self.config.backend == "anytext2":
                 from src.models.anytext2_editor import AnyText2Editor
-                self._editor = AnyText2Editor(self.config)
+                inpainter = None
+                if self.config.anytext2_adaptive_mask:
+                    inpainter = self._get_inpainter()
+                self._editor = AnyText2Editor(self.config, inpainter=inpainter)
             elif self.config.backend == "stage_a":
                 raise NotImplementedError(
                     "Stage A model integration not yet implemented. "

@@ -481,3 +481,286 @@ class TestS3Integration:
         # _init_editor should create an AnyText2Editor (won't connect yet — lazy)
         editor = stage._init_editor()
         assert isinstance(editor, AnyText2Editor)
+
+
+class _FakeInpainter:
+    """Mock BaseBackgroundInpainter: marks every pixel it sees as 42.
+
+    Lets tests distinguish "touched by inpainter" from "original pixels"
+    without needing an actual model or checkpoint.
+    """
+
+    def __init__(self):
+        self.call_count = 0
+        self.last_shape: tuple[int, ...] | None = None
+
+    def inpaint(self, canonical_roi: np.ndarray) -> np.ndarray:
+        self.call_count += 1
+        self.last_shape = canonical_roi.shape
+        return np.full_like(canonical_roi, 42)
+
+
+class TestAdaptiveMask:
+    """Adaptive mask sizing flow: shrink mask + pre-inpaint for long→short.
+
+    Covers:
+    - Trigger when target aspect is much narrower than source canonical
+    - Skip (fast path) when within tolerance
+    - Skip when config flag is off
+    - Skip (with warning) when no inpainter is provided
+    - Graceful fallback on inpainter exception
+    - Caller's roi_image is not mutated
+    """
+
+    @staticmethod
+    def _server_returning(tmpdir: str, h: int, w: int):
+        fake_path = str(Path(tmpdir) / "result.png")
+        cv2.imwrite(fake_path, np.full((h, w, 3), 128, dtype=np.uint8))
+        mock_client = MagicMock()
+        mock_job = MagicMock()
+        mock_job.result.return_value = ([{"image": fake_path}], "debug")
+        mock_client.submit.return_value = mock_job
+        return mock_client
+
+    @staticmethod
+    def _capture_masks(editor_call):
+        """Run *editor_call* while recording any imwrite with 'mask' in path."""
+        captured = []
+        original_imwrite = cv2.imwrite
+
+        def capture(path, img, *args, **kwargs):
+            if "mask" in path:
+                captured.append(img.copy())
+            return original_imwrite(path, img, *args, **kwargs)
+
+        with patch("cv2.imwrite", side_effect=capture):
+            editor_call()
+        return captured
+
+    def _adaptive_config(self, **overrides) -> TextEditorConfig:
+        cfg = TextEditorConfig(
+            backend="anytext2",
+            server_url="http://fake-server:7860/",
+            server_timeout=10,
+            anytext2_ddim_steps=5,
+            anytext2_adaptive_mask=True,
+            anytext2_mask_aspect_tolerance=0.15,
+            anytext2_mask_min_ratio=0.25,
+        )
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_long_to_short_triggers_inpaint_and_narrows_mask(self, mock_get_client):
+        """7:1 canonical + 3-char CJK target → mask should shrink + inpainter runs."""
+        cfg = self._adaptive_config()
+        inpainter = _FakeInpainter()
+        editor = AnyText2Editor(cfg, inpainter=inpainter)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Canonical-ish 7:1 ROI: 560×80 scaled up to AnyText2's grid
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+
+            captured = self._capture_masks(
+                lambda: editor.edit_text(roi, "我是示"),
+            )
+
+        # Inpainter was called exactly once on the full ROI
+        assert inpainter.call_count == 1
+        assert inpainter.last_shape == (80, 560, 3)
+
+        # Mask was written and is narrower than "full-width"
+        assert len(captured) == 1
+        alpha = captured[0][:, :, 3]
+        # Count masked columns per row (rows are uniform in our rect mask)
+        masked_cols_any_row = (alpha[alpha.shape[0] // 2] == 255).sum()
+        total_cols = alpha.shape[1]
+        # New mask ≈ 240/560 × total_cols ≈ 43% of the width
+        # Non-adaptive would cover 100% of the content columns → > 95%
+        assert masked_cols_any_row < 0.6 * total_cols
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_within_tolerance_skips_inpaint(self, mock_get_client):
+        """Close aspect → adaptive flow skipped, inpainter untouched."""
+        cfg = self._adaptive_config()
+        inpainter = _FakeInpainter()
+        editor = AnyText2Editor(cfg, inpainter=inpainter)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 3:1 canonical + 3-char CJK target → exact aspect match
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 1536)
+            roi = np.full((80, 240, 3), 200, dtype=np.uint8)
+
+            editor.edit_text(roi, "我是示")
+
+        assert inpainter.call_count == 0
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_adaptive_flag_false_skips_inpaint(self, mock_get_client):
+        """anytext2_adaptive_mask=False → adaptive flow disabled entirely."""
+        cfg = self._adaptive_config(anytext2_adaptive_mask=False)
+        inpainter = _FakeInpainter()
+        editor = AnyText2Editor(cfg, inpainter=inpainter)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+            editor.edit_text(roi, "我是示")
+
+        assert inpainter.call_count == 0
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_no_inpainter_logs_warning_and_skips(self, mock_get_client, caplog):
+        """adaptive_mask=True but no inpainter provided → warning + fallback."""
+        cfg = self._adaptive_config()
+        editor = AnyText2Editor(cfg, inpainter=None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+            with caplog.at_level("WARNING"):
+                editor.edit_text(roi, "我是示")
+
+        assert any(
+            "adaptive_mask" in rec.message and "no inpainter" in rec.message
+            for rec in caplog.records
+        )
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_no_inpainter_warning_only_once(self, mock_get_client, caplog):
+        """Warning should be rate-limited to once per editor instance."""
+        cfg = self._adaptive_config()
+        editor = AnyText2Editor(cfg, inpainter=None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+            with caplog.at_level("WARNING"):
+                editor.edit_text(roi, "我是示")
+                editor.edit_text(roi, "你好")
+
+        # Exactly one warning across both calls
+        msgs = [r.message for r in caplog.records if "adaptive_mask" in r.message]
+        assert len(msgs) == 1
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_inpainter_exception_falls_back_gracefully(self, mock_get_client, caplog):
+        """Inpainter raises → log warning, use non-adaptive mask, don't crash."""
+        cfg = self._adaptive_config()
+
+        class _BrokenInpainter:
+            def inpaint(self, x):
+                raise RuntimeError("OOM simulated")
+
+        editor = AnyText2Editor(cfg, inpainter=_BrokenInpainter())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+
+            with caplog.at_level("WARNING"):
+                result = editor.edit_text(roi, "我是示")
+
+        # Should not crash; result is the server's output, re-cropped
+        assert result.shape == (80, 560, 3)
+        assert any("inpainter failed" in r.message for r in caplog.records)
+
+    @patch("src.models.anytext2_editor.AnyText2Editor._get_client")
+    @patch.dict("sys.modules", {"gradio_client": MagicMock(handle_file=_make_mock_handle_file())})
+    def test_caller_roi_not_mutated(self, mock_get_client):
+        """Adaptive flow must not modify the caller's input array."""
+        cfg = self._adaptive_config()
+        editor = AnyText2Editor(cfg, inpainter=_FakeInpainter())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_get_client.return_value = self._server_returning(tmpdir, 512, 3584)
+            roi = np.full((80, 560, 3), 200, dtype=np.uint8)
+            roi_snapshot = roi.copy()
+
+            editor.edit_text(roi, "我是示")
+
+        assert np.array_equal(roi, roi_snapshot)
+
+
+class TestS3InpainterWiring:
+    """TextEditingStage creates and forwards an inpainter to AnyText2Editor."""
+
+    def test_s3_passes_inpainter_when_configured(self, tmp_path, monkeypatch):
+        """When propagation.inpainter_backend='srnet' + checkpoint + anytext2 +
+        adaptive_mask=True, the editor should receive an inpainter instance."""
+        # Stub out SRNetInpainter to avoid loading a real checkpoint
+        import src.stages.s4_propagation.srnet_inpainter as srnet_mod
+        from src.config import PipelineConfig
+        from src.stages.s3_text_editing import TextEditingStage
+
+        class _StubSRNetInpainter:
+            def __init__(self, checkpoint_path, device):
+                self.checkpoint_path = checkpoint_path
+                self.device = device
+
+            def inpaint(self, x):
+                return x
+
+        monkeypatch.setattr(srnet_mod, "SRNetInpainter", _StubSRNetInpainter)
+
+        # Any non-empty path works since we stubbed the class
+        fake_ckpt = tmp_path / "fake.pth"
+        fake_ckpt.write_bytes(b"not a real checkpoint")
+
+        config = PipelineConfig()
+        config.text_editor.backend = "anytext2"
+        config.text_editor.server_url = "http://fake:7860/"
+        config.text_editor.anytext2_adaptive_mask = True
+        config.propagation.inpainter_backend = "srnet"
+        config.propagation.inpainter_checkpoint_path = str(fake_ckpt)
+        config.propagation.inpainter_device = "cpu"
+
+        stage = TextEditingStage(config)
+        editor = stage._init_editor()
+
+        assert isinstance(editor, AnyText2Editor)
+        assert editor._inpainter is not None
+        assert isinstance(editor._inpainter, _StubSRNetInpainter)
+
+    def test_s3_no_inpainter_when_adaptive_off(self):
+        """adaptive_mask=False → don't even touch the inpainter path."""
+        from src.config import PipelineConfig
+        from src.stages.s3_text_editing import TextEditingStage
+
+        config = PipelineConfig()
+        config.text_editor.backend = "anytext2"
+        config.text_editor.server_url = "http://fake:7860/"
+        config.text_editor.anytext2_adaptive_mask = False
+        config.propagation.inpainter_backend = "srnet"
+        config.propagation.inpainter_checkpoint_path = "/whatever/ckpt"
+
+        stage = TextEditingStage(config)
+        editor = stage._init_editor()
+
+        assert isinstance(editor, AnyText2Editor)
+        assert editor._inpainter is None
+
+    def test_s3_no_inpainter_when_backend_unset(self):
+        """adaptive_mask=True but no propagation inpainter → editor gets None."""
+        from src.config import PipelineConfig
+        from src.stages.s3_text_editing import TextEditingStage
+
+        config = PipelineConfig()
+        config.text_editor.backend = "anytext2"
+        config.text_editor.server_url = "http://fake:7860/"
+        config.text_editor.anytext2_adaptive_mask = True
+        # propagation.inpainter_backend stays at default (None/empty)
+
+        stage = TextEditingStage(config)
+        editor = stage._init_editor()
+
+        assert isinstance(editor, AnyText2Editor)
+        assert editor._inpainter is None
