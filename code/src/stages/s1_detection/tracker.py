@@ -1,4 +1,6 @@
-"""Track text detections across frames and fill gaps via optical flow."""
+"""
+Track text detections across frames and fill gaps via optical flow.
+"""
 
 from __future__ import annotations
 
@@ -16,11 +18,13 @@ from src.utils.optical_flow import (
     track_points_lucas_kanade,
 )
 
+# Kalman
+from src.utils.kalman import QuadKalmanFilter
+
 logger = logging.getLogger(__name__)
 
 
 def bbox_iou(a: BBox, b: BBox) -> float:
-    """Compute IoU (Intersection over Union) between two bounding boxes."""
     x_overlap = max(0, min(a.x2, b.x2) - max(a.x, b.x))
     y_overlap = max(0, min(a.y2, b.y2) - max(a.y, b.y))
     intersection = x_overlap * y_overlap
@@ -35,15 +39,44 @@ class TextTracker:
         self.config = config
         self._cotracker: CoTrackerFlowTracker | None = None
 
+        # Kalman filters per track
+        self._kalman_filters: dict[int, QuadKalmanFilter] = {}
+
+        # EMA state per track
+        self._ema_states: dict[int, np.ndarray] = {}
+
+        # EMA smoothing factor (tunable)
+        self._ema_alpha = 0.6
+
+    # -------------------------
+    # Kalman helpers
+    # -------------------------
+    def _get_kalman(self, track_id: int) -> QuadKalmanFilter:
+        if track_id not in self._kalman_filters:
+            self._kalman_filters[track_id] = QuadKalmanFilter()
+        return self._kalman_filters[track_id]
+
+    # -------------------------
+    # EMA helper
+    # -------------------------
+    def _apply_ema(self, track_id: int, points: np.ndarray) -> np.ndarray:
+        prev = self._ema_states.get(track_id)
+
+        if prev is None:
+            smoothed = points
+        else:
+            smoothed = self._ema_alpha * prev + (1.0 - self._ema_alpha) * points
+
+        self._ema_states[track_id] = smoothed
+        return smoothed
+
     # -------------------------
     # Text normalization & similarity
     # -------------------------
     def _normalize_text(self, text: str) -> str:
-        """Normalize text for robust matching."""
         return text.lower().replace(" ", "")
 
     def _compute_text_similarity(self, text1: str, text2: str) -> float:
-        """Character-level similarity using normalized strings."""
         t1 = self._normalize_text(text1)
         t2 = self._normalize_text(text2)
 
@@ -53,6 +86,43 @@ class TextTracker:
         matches = sum(c1 == c2 for c1, c2 in zip(t1, t2))
         max_len = max(len(t1), len(t2))
         return matches / max_len
+
+    # -------------------------
+    # Smoothing utilities (light)
+    # -------------------------
+    def _to_np(self, pts):
+        return np.asarray(pts, dtype=np.float32)
+
+    def _smooth_quad(self, prev: Quad, new: Quad, alpha: float = 0.3) -> Quad:
+        prev_pts = self._to_np(prev.points)
+        new_pts = self._to_np(new.points)
+
+        smoothed = alpha * prev_pts + (1.0 - alpha) * new_pts
+        return Quad(points=smoothed)
+
+    def _smooth_or_update_detection(
+        self,
+        track: TextTrack,
+        frame_idx: int,
+        new_det: TextDetection,
+    ) -> TextDetection:
+        if frame_idx in track.detections:
+            existing = track.detections[frame_idx]
+            smoothed_quad = self._smooth_quad(existing.quad, new_det.quad)
+
+            return TextDetection(
+                frame_idx=frame_idx,
+                quad=smoothed_quad,
+                bbox=smoothed_quad.to_bbox(),
+                text=new_det.text,
+                ocr_confidence=new_det.ocr_confidence,
+                sharpness_score=new_det.sharpness_score,
+                contrast_score=new_det.contrast_score,
+                frontality_score=new_det.frontality_score,
+                composite_score=new_det.composite_score,
+            )
+
+        return new_det
 
     # -------------------------
     # Tracking
@@ -97,10 +167,23 @@ class TextTracker:
                     text_similarity = self._compute_text_similarity(det.text, last_det.text)
                     temporal_score = 1.0 / (1.0 + abs(last_det.frame_idx - frame_idx))
 
+                    center_distance = np.linalg.norm(
+                        np.array([
+                            (det.bbox.x + det.bbox.x2) / 2.0,
+                            (det.bbox.y + det.bbox.y2) / 2.0
+                        ]) - np.array([
+                            (last_det.bbox.x + last_det.bbox.x2) / 2.0,
+                            (last_det.bbox.y + last_det.bbox.y2) / 2.0
+                        ])
+                    )
+
+                    distance_penalty = 1.0 / (1.0 + center_distance)
+
                     score = (
-                        0.55 * iou +
-                        0.25 * text_similarity +
-                        0.20 * temporal_score
+                        0.50 * iou +
+                        0.20 * text_similarity +
+                        0.20 * temporal_score +
+                        0.10 * distance_penalty
                     )
 
                     if score > best_score:
@@ -110,7 +193,12 @@ class TextTracker:
                 if best_track_id is not None:
                     for track in tracks:
                         if track.track_id == best_track_id:
-                            track.detections[frame_idx] = det
+                            smoothed_det = self._smooth_or_update_detection(
+                                track,
+                                frame_idx,
+                                det,
+                            )
+                            track.detections[frame_idx] = smoothed_det
                             break
 
                     active[best_track_id] = det
@@ -127,7 +215,7 @@ class TextTracker:
                         translated = translate_fn(det.text)
                     except Exception:
                         logger.warning(
-                            "Translation failed for text '%s', using source text as target",
+                            "Translation failed for text '%s', using source text",
                             det.text,
                         )
                         translated = det.text
@@ -183,14 +271,28 @@ class TextTracker:
                 if frame_idx == ref_idx:
                     continue
 
-                if full or frame_idx not in track.detections:
-                    track.detections[frame_idx] = TextDetection(
-                        frame_idx=frame_idx,
-                        quad=quad,
-                        bbox=quad.to_bbox(),
-                        text=track.source_text,
-                        ocr_confidence=0.0,
-                    )
+                existing = track.detections.get(frame_idx)
+
+                if existing is not None:
+                    quad = self._smooth_quad(existing.quad, quad, alpha=0.3)
+
+                # Kalman
+                kalman = self._get_kalman(track.track_id)
+                quad_points = self._to_np(quad.points)
+                filtered_points = kalman.update(quad_points)
+
+                # EMA (final smoothing)
+                filtered_points = self._apply_ema(track.track_id, filtered_points)
+
+                quad = Quad(points=filtered_points)
+
+                track.detections[frame_idx] = TextDetection(
+                    frame_idx=frame_idx,
+                    quad=quad,
+                    bbox=quad.to_bbox(),
+                    text=track.source_text,
+                    ocr_confidence=0.0,
+                )
 
         return tracks
 
@@ -209,9 +311,6 @@ class TextTracker:
         track_frame_idx_start = min(track.detections.keys())
         track_frame_idx_end = max(track.detections.keys())
 
-        # -------------------------
-        # CoTracker branch (numpy conversion here only)
-        # -------------------------
         if self.config.optical_flow_method == "cotracker":
             ref_det = track.detections.get(ref_idx)
             if ref_det is None:
@@ -225,7 +324,6 @@ class TextTracker:
                 if track_frame_idx_start <= i <= track_frame_idx_end
             ]
 
-            # Convert list -> numpy
             ref_points = np.asarray(ref_det.quad.points, dtype=np.float32)
 
             tracked_points = self._cotracker.track_points_batch(
@@ -235,17 +333,11 @@ class TextTracker:
                 ref_points,
             )
 
-            # Convert numpy -> list
             return {
-                idx: Quad(
-                    points=pts.tolist() if isinstance(pts, np.ndarray) else pts
-                )
+                idx: Quad(points=pts.tolist() if isinstance(pts, np.ndarray) else pts)
                 for idx, pts in tracked_points.items()
             }
 
-        # -------------------------
-        # Optical flow fallback
-        # -------------------------
         tracked_quads: dict[int, Quad] = {}
 
         if ref_only:

@@ -25,7 +25,7 @@ logging.getLogger("src.stages.s1_detection.tracker").setLevel(logging.DEBUG)
 # =======================
 # HARDCODED ARGUMENTS
 # =======================
-INPUT_VIDEO = "../video.mp4"
+INPUT_VIDEO = "../Chili.mp4"
 OUTPUT_VIDEO = "./output.mp4"
 CONFIG_PATH = os.path.join(REPO_PATH, "config/adv.yaml")
 
