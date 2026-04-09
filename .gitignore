@@ -46,3 +46,4 @@ test_data/*.mp4
 # installed third-party code
 third_party/co-tracker/
 third_party/SRNet/
+third_party/lama/
