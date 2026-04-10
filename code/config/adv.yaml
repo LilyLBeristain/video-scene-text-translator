@@ -43,6 +43,7 @@ detection:
   # S1 quad smoothing: Kalman + EMA on gap-filled quads. Off by default
   # because S5 temporal smoothing handles stability at the output stage.
   # Enable only if S5 smoothing is disabled and you need S1-level filtering.
+  use_flow_ocr_blend: true
   use_kalman_smoothing: false
   use_ema_smoothing: false
 
