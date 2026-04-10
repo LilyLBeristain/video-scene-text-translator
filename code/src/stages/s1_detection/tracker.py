@@ -273,7 +273,7 @@ class TextTracker:
 
                 existing = track.detections.get(frame_idx)
 
-                if existing is not None:
+                if existing is not None and self.config.use_flow_ocr_blend:
                     quad = self._smooth_quad(existing.quad, quad, alpha=0.3)
 
                 quad_points = self._to_np(quad.points)

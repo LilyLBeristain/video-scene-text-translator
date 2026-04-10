@@ -56,6 +56,12 @@ class DetectionConfig:
     # on the raw optical-flow quads before S2 frontalization. Stacking
     # multiple filters introduces positional lag — disable if S5 temporal
     # smoothing is used instead.
+    #
+    # use_flow_ocr_blend: when True, gap-filled quads on frames that already
+    # have an OCR detection are blended 30% toward the OCR quad. Harmful
+    # with full_propagation + CoTracker because CoTracker's globally-
+    # optimized trajectory gets corrupted by noisy per-frame OCR quads.
+    use_flow_ocr_blend: bool = False
     use_kalman_smoothing: bool = False
     use_ema_smoothing: bool = False
     ema_alpha: float = 0.6  # EMA weight on previous state (higher = more lag)
