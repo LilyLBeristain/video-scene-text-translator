@@ -34,8 +34,10 @@ Thumbs.db
 code/debug_output/
 _refs/
 checkpoints/bpn/
+checkpoints/refiner/
 code/checkpoints/
 code/eval_output/
+saved_videos/
 
 # Claude Code (track commands/agents/skills, ignore local files)
 .claude/local.md

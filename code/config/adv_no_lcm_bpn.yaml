@@ -1,5 +1,7 @@
-# Default pipeline configuration
-# Override per-run via CLI flags or a custom YAML file
+# Ablation config: adv.yaml with S4 LCM + BPN disabled.
+# S5 alignment refiner still ON. Used to isolate the refiner's
+# contribution from LCM/BPN side effects. See
+# saved_videos/refiner_ablation/no_lcm_bpn/ for comparison outputs.
 
 input_video: ""
 output_video: ""
@@ -40,12 +42,6 @@ detection:
   farneback_poly_sigma: 1.2
   lk_win_size: [21, 21]
   lk_max_level: 3
-  # S1 quad smoothing: Kalman + EMA on gap-filled quads. Off by default
-  # because S5 temporal smoothing handles stability at the output stage.
-  # Enable only if S5 smoothing is disabled and you need S1-level filtering.
-  use_flow_ocr_blend: true
-  use_kalman_smoothing: false
-  use_ema_smoothing: false
 
 translation:
   source_lang: "en"
@@ -93,21 +89,19 @@ revert:
   # chain to correct residual CoTracker tracking error. See
   # code/src/models/refiner/README.md for the network design.
   use_refiner: true
-  refiner_checkpoint_path: "../checkpoints/refiner/refiner_v0.pt"
+  refiner_checkpoint_path: "checkpoints/refiner/refiner_v0.pt"
   refiner_device: "cuda"
   refiner_image_size: [64, 128]  # (H, W) network input — must match training
   refiner_max_corner_offset_px: 16.0
   refiner_rejection_warn_threshold: 0.1
-  temporal_smooth_window: 7
-  temporal_smooth_sigma: 10
 
 text_editor:
   backend: "anytext2"
   model_path: null
   device: "cpu"
   # AnyText2 Gradio server (set to your server's URL, e.g. http://localhost:45843/)
-  server_url: "http://109.231.106.68:45843/"
-  #server_url: "http://localhost:6006/"
+  #server_url: "http://109.231.106.68:45843/"
+  server_url: "http://localhost:6006/"
   server_timeout: 120
   anytext2_ddim_steps: 20
   anytext2_cfg_scale: 7.5
@@ -118,8 +112,3 @@ text_editor:
   # ROI context expansion: include real scene pixels around text for better AnyText2 quality.
   # 0.0 = tight crop (default), 0.3 = 30% margin on each side.
   roi_context_expansion: 0.3
-  # Adaptive mask sizing for AnyText2: shrink mask + pre-inpaint source text
-  # when target is much narrower than source canonical (avoids gibberish-fill).
-  # Requires propagation.inpainter_backend to be set (reuses the S4 inpainter).
-  anytext2_adaptive_mask: true
-  anytext2_mask_aspect_tolerance: 0.15   # skip if mismatch is below this fraction

@@ -31,7 +31,7 @@ class DetectionConfig:
     # Process every N-th frame for detection (1 = every frame)
     frame_sample_rate: int = 1
     # track_break_threshold: maximum number of frames to allow between detections in the same track
-    track_break_threshold: int = 5
+    track_break_threshold: int = 30
     # Optical flow for tracking quads between frames
     optical_flow_method: str = "farneback"  # "farneback", "lucas_kanade", or "cotracker"
     # "gaps_only": only fill frames missing OCR detections (original behavior)
@@ -52,6 +52,19 @@ class DetectionConfig:
     lk_max_level: int = 3
     # Optional word whitelist — if set, only keep detections whose words are all in this set
     word_whitelist: set[str] | None = None
+    # S1 quad smoothing filters applied during gap-filling. These operate
+    # on the raw optical-flow quads before S2 frontalization. Stacking
+    # multiple filters introduces positional lag — disable if S5 temporal
+    # smoothing is used instead.
+    #
+    # use_flow_ocr_blend: when True, gap-filled quads on frames that already
+    # have an OCR detection are blended 30% toward the OCR quad. Harmful
+    # with full_propagation + CoTracker because CoTracker's globally-
+    # optimized trajectory gets corrupted by noisy per-frame OCR quads.
+    use_flow_ocr_blend: bool = False
+    use_kalman_smoothing: bool = False
+    use_ema_smoothing: bool = False
+    ema_alpha: float = 0.6  # EMA weight on previous state (higher = more lag)
 
 
 @dataclass
@@ -106,11 +119,58 @@ class PropagationConfig:
     bpn_image_size: tuple[int, int] = (64, 128)  # (H, W) at training time
     bpn_kernel_size: int = 41
 
+    # Attach each detection's canonical-frontal frame ROI to its PropagatedROI.
+    # Needed by the S5 alignment refiner so it can predict ΔH against the
+    # reference canonical ROI. Adds memory per detection (~track.canonical_size
+    # * 3 bytes per detection), so default off.
+    save_target_canonical_roi: bool = False
+
 
 @dataclass
 class RevertConfig:
     blend_border_size: int = 3
     blend_method: str = "gaussian"
+
+    # S5 alignment refiner. See code/src/models/refiner/README.md for the
+    # network design and code/src/stages/s5_revert/refiner.py for the
+    # inference wrapper. When enabled, predicts a residual homography
+    # (ΔH) between the reference and target canonical ROIs and composes
+    # it into the warp chain to correct residual CoTracker tracking
+    # error. Requires propagation.save_target_canonical_roi=True so S4
+    # populates PropagatedROI.target_roi_canonical.
+    use_refiner: bool = False
+    refiner_checkpoint_path: str = "checkpoints/refiner/refiner_v0.pt"
+    refiner_device: str = "cuda"
+    refiner_image_size: tuple[int, int] = (64, 128)  # (H, W) at network input
+    refiner_max_corner_offset_px: float = 16.0
+    # If more than this fraction of refiner predictions per video are
+    # rejected by the sanity checks, escalate the log line from DEBUG
+    # to INFO so we notice without spamming the logs on clean runs.
+    refiner_rejection_warn_threshold: float = 0.1
+
+    # Do-no-harm gate (Tier 1 of refiner improvements). After the model
+    # produces a sane ΔH, score the alignment under identity vs ΔH using
+    # masked NCC on luminance. Only apply ΔH if it strictly improves the
+    # score by `refiner_score_margin`. Catches the failure mode where the
+    # network over-corrects on already-aligned pairs and adds visible
+    # jitter. Set use_refiner_gate=False to disable the gate entirely
+    # (legacy behavior — the model's own ΔH is always applied if it
+    # passes the sanity checks).
+    use_refiner_gate: bool = True
+    refiner_score_margin: float = 0.01
+
+    # Temporal smoothing of the final projected quad corners across
+    # frames within each track. Applies a center-weighted (Gaussian)
+    # moving average to the 4 corner trajectories in frame space,
+    # reducing both CoTracker tracking jitter and refiner prediction
+    # noise. Works with or without the refiner — when the refiner is
+    # off, smooths the raw H_from_frontal projections.
+    # Set to 1 to disable (no smoothing). Minimum effective value is 3.
+    temporal_smooth_window: int = 1
+    # Gaussian sigma for the smoothing kernel, in frames. A good
+    # starting value is window_size / 4 (σ≈2 for window=7).
+    # Smaller σ → sharper center weight → less smoothing.
+    temporal_smooth_sigma: float = 2.0
 
 
 @dataclass
@@ -227,4 +287,24 @@ class PipelineConfig:
             errors.append(
                 "text_editor.server_url is required when backend is 'anytext2'"
             )
+        if self.revert.use_refiner:
+            if not self.revert.refiner_checkpoint_path:
+                errors.append(
+                    "revert.refiner_checkpoint_path is required when "
+                    "revert.use_refiner is True"
+                )
+            if not self.propagation.save_target_canonical_roi:
+                errors.append(
+                    "propagation.save_target_canonical_roi must be True "
+                    "when revert.use_refiner is True (the refiner needs "
+                    "S4 to attach target_roi_canonical to each PropagatedROI)"
+                )
+            if not (0.0 <= self.revert.refiner_rejection_warn_threshold <= 1.0):
+                errors.append(
+                    "revert.refiner_rejection_warn_threshold must be in [0, 1]"
+                )
+            if self.revert.refiner_max_corner_offset_px <= 0:
+                errors.append(
+                    "revert.refiner_max_corner_offset_px must be > 0"
+                )
         return errors

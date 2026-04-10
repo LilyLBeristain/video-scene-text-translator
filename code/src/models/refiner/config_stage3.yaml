@@ -1,0 +1,99 @@
+# ROI alignment refiner — Stage 3: temporal + reverse consistency fine-tune.
+#
+# Resumes from the Stage 2 checkpoint (refiner_v0.pt) and adds two
+# consistency losses on triplet samples:
+#   - reverse:  ΔH(S→T) + ΔH(T→S) ≈ 0   (Zhang et al. ECCV 2020)
+#   - temporal: ΔH(ref, t) ≈ ΔH(ref, t+1) (novel, targets jitter)
+#
+# Run from code/:
+#   python -m src.models.refiner.train \
+#       --config src/models/refiner/config_stage3.yaml \
+#       --init-from checkpoints/refiner/refiner_v0.pt
+
+seed: 44
+device: cuda
+
+data:
+  data_root: /workspace/tpm_dataset
+  train_videos:
+    - realworld_real_video0
+    - realworld_real_video1
+    - realworld_real_video2
+    - realworld_real_video3
+    - realworld_real_video4
+    - realworld_real_video5
+    - realworld_real_video6
+    - realworld_real_video7
+    - realworld_real_video8
+    - realworld_real_video9
+    - realworld_real_video10
+    - realworld_real_video11
+    - realworld_real_video12
+    - realworld_real_video13
+    - realworld_real_video14
+    - realworld_custom_video1
+    - realworld_custom_video2
+    - realworld_custom_video3
+    - realworld_seg_3_Altman
+    - roi_extraction_robo_video_1
+    - roi_extraction_robo_video_2
+    - roi_extraction_robo_video_3
+    - roi_extraction_robo_video_4
+    - roi_extraction_robo_video_5
+    - roi_extraction_robo_video_6
+    - roi_extraction_robo_video_7
+    - roi_extraction_robo_video_8
+    - roi_extraction_robo_video_9
+  val_videos:
+    - realworld_COFFEE
+    - realworld_custom_video4
+    - realworld_real_video15
+    - realworld_real_video16
+    - realworld_real_video17
+    - realworld_real_video18
+  image_size: [64, 128]
+  pairs_per_track: 64
+  syn_perturbation_px: 8.0
+  photometric_strength: 1.0
+  min_track_length: 3              # need ≥ 3 for triplets (target + neighbor)
+  cache_in_ram: true
+  # Fraction of Type B samples that include a target_neighbor for
+  # temporal + reverse losses. 0.5 means half of all real samples are
+  # triplets, the other half are normal pairs.
+  triplet_fraction: 0.5
+
+model:
+  base_channels: 32
+  dropout: 0.2
+  head_init_scale: 1.0e-3
+
+loss:
+  # Stage 2 weights carried over (Type A anchor + Type B primary losses).
+  corner: 1.0
+  recon: 0.25
+  ncc: 1.0
+  grad: 1.0
+  reg: 0.01
+  # Tier 2 consistency losses — new additions.
+  reverse: 0.1                     # bidirectional: pred(S,T) + pred(T,S) ≈ 0
+  temporal: 0.1                    # smoothness: pred(ref, t) ≈ pred(ref, t+1)
+  border_frac: 0.1
+  edge_value: 0.1
+  charbonnier_eps: 1.0e-3
+
+training:
+  batch_size: 128
+  num_workers: 8
+  epochs: 15
+  lr: 3.0e-5                      # same conservative LR as Stage 2
+  weight_decay: 1.0e-4
+  eta_min: 1.0e-6
+  warmup_epochs: 1
+  grad_clip: 1.0
+  # 70% real pairs, matching Stage 2.
+  real_pair_schedule:
+    0: 0.7
+
+checkpoint:
+  out_dir: checkpoints/refiner/stage3
+  save_every_epochs: 3
