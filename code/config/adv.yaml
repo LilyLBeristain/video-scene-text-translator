@@ -43,7 +43,7 @@ detection:
   # S1 quad smoothing: Kalman + EMA on gap-filled quads. Off by default
   # because S5 temporal smoothing handles stability at the output stage.
   # Enable only if S5 smoothing is disabled and you need S1-level filtering.
-  use_flow_ocr_blend: true
+  use_flow_ocr_blend: false
   use_kalman_smoothing: false
   use_ema_smoothing: false
 
@@ -63,7 +63,7 @@ propagation:
   histogram_bins: 256
   clip_limit: 2.0
   blend_blur_kernel: 5
-  use_lcm: false
+  use_lcm: true
   # Background inpainter for LCM. Only loaded when use_lcm=True.
   # Backends: "srnet" (lksshw/SRNet wrapper) or "none".
   inpainter_backend: "srnet"
@@ -93,21 +93,23 @@ revert:
   # chain to correct residual CoTracker tracking error. See
   # code/src/models/refiner/README.md for the network design.
   use_refiner: true
-  refiner_checkpoint_path: "../checkpoints/refiner/refiner_v0.pt"
+  refiner_checkpoint_path: "../checkpoints/refiner/refiner_v1.pt"
   refiner_device: "cuda"
   refiner_image_size: [64, 128]  # (H, W) network input — must match training
   refiner_max_corner_offset_px: 16.0
   refiner_rejection_warn_threshold: 0.1
   temporal_smooth_window: 7
   temporal_smooth_sigma: 10
+  pre_inpaint: true
+  pre_inpaint_expansion: 0.15   # 15% expansion from centroid
 
 text_editor:
   backend: "anytext2"
   model_path: null
   device: "cpu"
   # AnyText2 Gradio server (set to your server's URL, e.g. http://localhost:45843/)
-  server_url: "http://109.231.106.68:45843/"
-  #server_url: "http://localhost:6006/"
+  #server_url: "http://109.231.106.68:45843/"
+  server_url: "http://localhost:6006/"
   server_timeout: 120
   anytext2_ddim_steps: 20
   anytext2_cfg_scale: 7.5
