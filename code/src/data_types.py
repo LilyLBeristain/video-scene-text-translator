@@ -46,12 +46,25 @@ class Quad:
 
     points: np.ndarray  # shape (4, 2), dtype float32
 
-    def to_bbox(self) -> BBox:
-        """Compute axis-aligned bounding box enclosing this quad."""
-        x_min, y_min = self.points.min(axis=0).astype(int)
-        x_max, y_max = self.points.max(axis=0).astype(int)
-        return BBox(x=int(x_min), y=int(y_min),
-                     width=int(x_max - x_min), height=int(y_max - y_min))
+    def to_bbox(self):
+        import numpy as np
+
+        pts = np.asarray(self.points, dtype=np.float32)
+
+        x_min, y_min = pts.min(axis=0)
+        x_max, y_max = pts.max(axis=0)
+
+        x_min = float(x_min)
+        y_min = float(y_min)
+        x_max = float(x_max)
+        y_max = float(y_max)
+
+        return BBox(
+            x=int(round(x_min)),
+            y=int(round(y_min)),
+            width=int(round(x_max - x_min)),
+            height=int(round(y_max - y_min)),
+        )
 
     def aspect_ratio(self) -> float:
         """Width/height ratio based on average edge lengths."""
