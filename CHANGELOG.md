@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-04-10 — AnyText2 Adaptive Mask Sizing (fix/anytext2-adaptive-mask)
+
+### Adaptive Mask for Long→Short Translations
+- When translated text is much shorter than source (e.g. "WARDEN" → "典狱长", "Birthday" → "生日"), shrink the AnyText2 edit mask to match the target's natural width instead of using the full source-width mask
+- Prevents AnyText2 from filling excess mask space with gibberish characters — a documented limitation across all mask-based scene text editing models
+- Character-class width heuristic estimates target text width without font dependencies (CJK=1.0, Latin upper=0.60, Latin lower=0.50, digit=0.55, space=0.30)
+- Configurable aspect tolerance (`anytext2_mask_aspect_tolerance`, default 0.15) skips the adaptive flow for close-enough translations (e.g. STOP→ALTO)
+
+### Adaptive Canvas Crop
+- After shrinking the mask, crop the canvas sent to AnyText2 to be centered on the mask with mask-proportional expansion (reuses `roi_context_expansion` ratio)
+- Improves mask-to-canvas ratio from ~21% to ~62%, giving AnyText2 a tighter, better-proportioned canvas
+- m1 (font mimic) input unchanged — still uses the full pre-adaptive ROI for complete font style extraction
+- Fix latent bug: mimic mask array now uses mimic-prepared dimensions instead of main canvas dimensions
+
+### SRNet Inpaint Artifact Cleanup
+- Apply bilateral filter (`d=9, sigmaColor=75, sigmaSpace=75`) to SRNet-inpainted background before compositing, removing colored noise artifacts that polluted AnyText2's style
+- Skip middle-strip restore: send fully clean (text-free) background to AnyText2 instead of restoring original text in the mask area. AnyText2 generates text from scratch guided by m1 font style reference
+
+### Font Mimic Decoupling
+- Separate m1 (font mimic) input from the main edit canvas: m1 uses the pre-adaptive ROI with full-width mask so AnyText2's font encoder sees complete source glyphs
+- Main ref_img uses the adaptive hybrid canvas with shortened mask
+
+### Configuration
+- Add `text_editor.anytext2_adaptive_mask` (default true), `anytext2_mask_aspect_tolerance` (default 0.15) to `TextEditorConfig`
+- Reuses `propagation.inpainter_backend` for the SRNet inpainter (separate instance from S4, lazy-loaded)
+- Add `ANYTEXT2_DEBUG_DIR` env var to save AnyText2 server inputs for inspection
+
+### Testing
+- 9 unit tests for `compute_adaptive_crop_box` (centering, edge clamping, containment)
+- 13 unit tests for `compute_adaptive_mask_rect` (tolerance, centering, min-ratio, skip cases)
+- 17 unit tests for `estimate_target_width` (character classification)
+- 12 unit tests for `restore_middle_strip` (feathering, edge clamping)
+- 8 editor integration tests (adaptive trigger, tolerance skip, flag-off, no-inpainter fallback, exception fallback, crop canvas size, caller non-mutation)
+- 3 S3 wiring tests (inpainter forwarded/skipped)
+- 243 total tests passing (4 pre-existing S5 failures unchanged)
+
 ## 2026-04-08 — Expanded ROI with Scene Context (feat/expanded-roi)
 
 ### ROI Context Expansion

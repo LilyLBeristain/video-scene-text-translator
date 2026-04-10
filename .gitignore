@@ -43,8 +43,13 @@ saved_videos/
 .claude/local.md
 .claude/settings.local.json
 .claude/plans/
-test_data/*.mp4
+test_data/
+docs/debug/
+
+code/config/_run_*.yaml
+docs/STRIVE.pdf
 
 # installed third-party code
 third_party/co-tracker/
 third_party/SRNet/
+third_party/lama/
