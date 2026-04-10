@@ -177,12 +177,19 @@ class CoTrackerFlowTracker:
 
         result: dict[int, np.ndarray] = {}
         for t, frame_idx in enumerate(all_frame_idxs):
-            if vis_np[t].all():
-                result[frame_idx] = tracks_np[t].astype(np.float32)
-            else:
+            # Always use CoTracker's predicted positions, even when some
+            # points are marked as not-visible. CoTracker predicts through
+            # occlusion via temporal attention — the positions are often
+            # still accurate. Dropping these frames causes fallback to OCR
+            # quads (which only cover the visible text portion) and is the
+            # root cause of the "ROI shrinks near occlusion" artifact.
+            result[frame_idx] = tracks_np[t].astype(np.float32)
+            if not vis_np[t].all():
+                n_occluded = int((~vis_np[t]).sum())
                 logger.debug(
-                    "CoTracker: frame %d has occluded points, skipping",
-                    frame_idx,
+                    "CoTracker: frame %d has %d/%d occluded points "
+                    "(positions kept)",
+                    frame_idx, n_occluded, vis_np[t].shape[0],
                 )
 
         return result
