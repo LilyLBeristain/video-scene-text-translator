@@ -52,6 +52,14 @@ class DetectionConfig:
     lk_max_level: int = 3
     # Optional word whitelist — if set, only keep detections whose words are all in this set
     word_whitelist: set[str] | None = None
+    # Post-gap-fill duplicate track suppression. For each track, test its
+    # bbox at its starting frame against all other tracks active at that
+    # frame. If any existing (earlier-starting) track covers more than
+    # `duplicate_track_coverage_threshold` of the new track's area, the
+    # new track is dropped as a duplicate / sub-region.
+    # Set to 0 to disable. 0.5 = drop if 50%+ of the new track's area
+    # is covered by an existing track.
+    duplicate_track_coverage_threshold: float = 0.5
     # S1 quad smoothing filters applied during gap-filling. These operate
     # on the raw optical-flow quads before S2 frontalization. Stacking
     # multiple filters introduces positional lag — disable if S5 temporal

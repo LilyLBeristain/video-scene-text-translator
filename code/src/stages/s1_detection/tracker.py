@@ -32,6 +32,19 @@ def bbox_iou(a: BBox, b: BBox) -> float:
     return intersection / max(union, 1e-6)
 
 
+def bbox_coverage(candidate: BBox, existing: BBox) -> float:
+    """Fraction of ``candidate``'s area covered by ``existing``.
+
+    Returns ``intersection(candidate, existing) / area(candidate)``.
+    This catches sub-region duplicates that IoU would miss: if "AB" is
+    fully inside "ABCD", IoU is low (~0.3) but coverage is ~1.0.
+    """
+    x_overlap = max(0, min(candidate.x2, existing.x2) - max(candidate.x, existing.x))
+    y_overlap = max(0, min(candidate.y2, existing.y2) - max(candidate.y, existing.y))
+    intersection = x_overlap * y_overlap
+    return intersection / max(candidate.area(), 1)
+
+
 class TextTracker:
     """Groups detections into tracks and fills gaps via optical flow."""
 
@@ -240,6 +253,73 @@ class TextTracker:
                 next_track_id += 1
 
         return tracks
+
+    # -------------------------
+    # Duplicate track suppression
+    # -------------------------
+    def filter_duplicate_tracks(
+        self,
+        tracks: list[TextTrack],
+    ) -> list[TextTrack]:
+        """Remove tracks whose starting-frame bbox is largely covered by
+        an existing earlier-starting track.
+
+        Catches the common OCR failure where e.g. "AB" is detected as a
+        new track starting at frame 70, but "ABCD" already exists from
+        frame 0 and covers the same region.
+
+        Algorithm:
+            1. Sort tracks by earliest detection frame (ties broken by
+               track_id for determinism).
+            2. For each track *t* in order, look at its bbox at its
+               starting frame.
+            3. Among all previously-accepted tracks that also have a
+               detection at that frame, compute ``bbox_coverage(t, i)``.
+            4. If any existing track covers more than the configured
+               threshold of *t*'s area → drop *t*.
+        """
+        threshold = self.config.duplicate_track_coverage_threshold
+        if threshold <= 0:
+            return tracks
+
+        # Sort: earlier start frame first, then by track_id for stability.
+        sorted_tracks = sorted(
+            tracks,
+            key=lambda t: (min(t.detections.keys()), t.track_id),
+        )
+
+        accepted: list[TextTrack] = []
+        for track in sorted_tracks:
+            start_frame = min(track.detections.keys())
+            start_det = track.detections[start_frame]
+            start_bbox = start_det.bbox
+
+            is_duplicate = False
+            for existing in accepted:
+                existing_det = existing.detections.get(start_frame)
+                if existing_det is None:
+                    continue
+                coverage = bbox_coverage(start_bbox, existing_det.bbox)
+                if coverage >= threshold:
+                    logger.info(
+                        "S1: dropping track %d ('%s', starts frame %d) — "
+                        "%.0f%% covered by track %d ('%s')",
+                        track.track_id, track.source_text, start_frame,
+                        coverage * 100, existing.track_id, existing.source_text,
+                    )
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
+                accepted.append(track)
+
+        n_dropped = len(tracks) - len(accepted)
+        if n_dropped > 0:
+            logger.info(
+                "S1: duplicate suppression dropped %d / %d tracks",
+                n_dropped, len(tracks),
+            )
+        return accepted
 
     # -------------------------
     # Optical flow gap filling

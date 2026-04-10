@@ -88,5 +88,9 @@ class DetectionStage:
             self.config.optical_flow_method, t_flow, len(tracks),
         )
 
+        # Filter duplicate / sub-region tracks after gap-filling so every
+        # track has quads on every frame for proper spatial overlap tests.
+        tracks = self.tracker.filter_duplicate_tracks(tracks)
+
         logger.info("S1: Found %d text tracks", len(tracks))
         return tracks
