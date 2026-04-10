@@ -19,6 +19,26 @@ else
     fi
     # create checkpoints/bpn directory if it doesn't exist
     mkdir -p checkpoints/bpn
-    # download the checkpoint using gdown
-    gdown https://drive.google.com/uc?id=1ZUDMCDw6tJka-0Dxkhev2bRvkkLMcKpv -O checkpoints/bpn/bpn_v0.pt
+    # check if bpn/bpn_v0.pt already exists, if it does, print a message and skip downloading
+    if [ -f "checkpoints/bpn/bpn_v0.pt" ]; then
+        echo "bpn_v0 checkpoint already exists, skipping download"
+    else
+        # download the checkpoint using gdown
+        gdown https://drive.google.com/uc?id=1ZUDMCDw6tJka-0Dxkhev2bRvkkLMcKpv -O checkpoints/bpn/bpn_v0.pt
+    fi
+    mkdir -p checkpoints/refiner
+    # check if refiner/refiner_v0.pt already exists, if it does, print a message and skip downloading
+    if [ -f "checkpoints/refiner/refiner_v0.pt" ]; then
+        echo "refiner_v0 checkpoint already exists, skipping download"
+    else
+        # download the checkpoint using gdown
+        gdown https://drive.google.com/uc?id=1_6Fk5Q6Gg7OwL2ILe5ikYVhSd7JEBSRo -O checkpoints/refiner/refiner_v0.pt
+    fi
+    # check if refiner/refiner_v1.pt already exists, if it does, print a message and skip downloading
+    if [ -f "checkpoints/refiner/refiner_v1.pt" ]; then
+        echo "refiner_v1 checkpoint already exists, skipping download"
+    else
+        # download the checkpoint using gdown
+        gdown https://drive.google.com/uc?id=1s_nY4L2FVdAv3Vh-l8JpJhFMKzNPLUFe -O checkpoints/refiner/refiner_v1.pt
+    fi
 fi
