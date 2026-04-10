@@ -380,13 +380,11 @@ class AnyText2Editor(BaseTextEditor):
             clean_canonical, d=9, sigmaColor=75, sigmaSpace=75,
         )
 
-        # Restore the middle strip (original pixels under the new mask)
-        hybrid_canonical = restore_middle_strip(
-            inpainted=clean_canonical,
-            original=canonical,
-            mask_rect=adaptive_rect,
-            feather_px=_ADAPTIVE_STRIP_FEATHER_PX,
-        )
+        # Skip middle-strip restore: send fully clean background to
+        # AnyText2 so it generates text from scratch (guided by m1 style)
+        # instead of replacing existing text.  Avoids any residual
+        # SRNet artifacts inside the mask area.
+        hybrid_canonical = clean_canonical
 
         # Paste hybrid back into a copy of roi_image (don't mutate caller)
         new_roi = roi_image.copy()
