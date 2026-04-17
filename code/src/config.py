@@ -115,10 +115,29 @@ class PropagationConfig:
     lcm_neighbor_self_weight: float = 2.0
 
     # Background inpainter for LCM. Only loaded when use_lcm=True.
-    # Backends: "srnet" (lksshw/SRNet wrapper) or "none".
+    # Backends: "srnet" (lksshw/SRNet wrapper), "hisam" (Hi-SAM stroke
+    # segmentation + cv2.inpaint Navier-Stokes), or "none".
     inpainter_backend: str = "none"
     inpainter_checkpoint_path: str | None = None
     inpainter_device: str = "cuda"
+
+    # Hi-SAM-specific knobs (only used when inpainter_backend == "hisam").
+    # model_type: Hi-SAM ViT backbone size ("vit_b", "vit_l", "vit_h").
+    # The default vit_l pairs with sam_tss_l_textseg.pth — stroke-level
+    # segmentation trained on TextSeg. Larger variants are more accurate
+    # but slower.
+    hisam_model_type: str = "vit_l"
+    # Pixel dilation applied to the stroke mask before inpainting. Prevents
+    # anti-aliased stroke halos from bleeding into the inpainted output.
+    hisam_mask_dilation_px: int = 3
+    # OpenCV inpaint method: "ns" (Navier-Stokes, Laplace-style, edge-aware)
+    # or "telea" (Fast Marching, faster but blurrier).
+    hisam_inpaint_method: str = "ns"
+    # Sliding-window patch-mode inference (Hi-SAM's demo_hisam.py
+    # --patch_mode). Off by default — canonical ROIs are small enough
+    # for single-pass. Enable if you feed expanded ROIs with
+    # roi_context_expansion > 0.3.
+    hisam_use_patch_mode: bool = False
 
     # Blur Prediction Network (TPM/BPN). Applies a per-frame differential
     # blur to the LCM-corrected ROI to match each frame's blur level.

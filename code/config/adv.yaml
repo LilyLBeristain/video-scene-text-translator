@@ -65,11 +65,19 @@ propagation:
   clip_limit: 2.0
   blend_blur_kernel: 5
   use_lcm: true
-  # Background inpainter for LCM. Only loaded when use_lcm=True.
-  # Backends: "srnet" (lksshw/SRNet wrapper) or "none".
+  # Background inpainter for LCM.
+  # Backends: "srnet", "hisam", or "none".
   inpainter_backend: "srnet"
+  # inpainter_backend: "hisam"   # swap in Hi-SAM stroke seg + cv2.inpaint
   inpainter_checkpoint_path: "../third_party/SRNet/checkpoints/trained_final_5M_.model"
+  # For hisam, point inpainter_checkpoint_path at a Hi-SAM head checkpoint, e.g.:
+  # inpainter_checkpoint_path: "../third_party/Hi-SAM/pretrained_checkpoint/sam_tss_l_textseg.pth"
   inpainter_device: "cuda"
+  # Hi-SAM-specific (only used when inpainter_backend: "hisam")
+  hisam_model_type: "vit_l"
+  hisam_mask_dilation_px: 3
+  hisam_inpaint_method: "ns"    # "ns" (Navier-Stokes) or "telea"
+  hisam_use_patch_mode: false
   # Blur Prediction Network (TPM/BPN). Applies a per-frame differential
   # blur to the LCM-corrected ROI to match each frame's blur level.
   # Only invoked when both use_lcm and use_bpn are True (paper order:
