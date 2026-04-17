@@ -290,17 +290,49 @@ class RevertStage:
         return (proj[:, :2] / w).astype(np.float64)
 
     def _get_pre_inpainter(self):
-        """Lazy-load the SRNet inpainter for pre-composite background clearing."""
+        """Lazy-load the configured pre-composite background inpainter.
+
+        Dispatches on ``config.pre_inpaint_backend``:
+
+        - ``"srnet"``: lksshw/SRNet wrapper (same class S4 uses).
+        - ``"hisam"``: Hi-SAM stroke segmentation + cv2.inpaint.
+
+        Raises ``ValueError`` on an unknown backend — unlike S3, S5's
+        pre-inpaint is an explicit pipeline stage opted into via
+        ``pre_inpaint=True``; misconfiguration should fail loudly rather
+        than silently skip.
+        """
         if self._pre_inpainter is not None:
             return self._pre_inpainter
-        from src.stages.s4_propagation.srnet_inpainter import SRNetInpainter
-        logger.info("S5: loading pre-composite inpainter from %s",
-                     self.config.pre_inpaint_checkpoint)
-        self._pre_inpainter = SRNetInpainter(
-            checkpoint_path=self.config.pre_inpaint_checkpoint,
-            device=self.config.pre_inpaint_device,
+        backend = self.config.pre_inpaint_backend
+        if backend == "srnet":
+            from src.stages.s4_propagation.srnet_inpainter import SRNetInpainter
+            logger.info("S5: loading SRNet pre-composite inpainter from %s",
+                         self.config.pre_inpaint_checkpoint)
+            self._pre_inpainter = SRNetInpainter(
+                checkpoint_path=self.config.pre_inpaint_checkpoint,
+                device=self.config.pre_inpaint_device,
+            )
+            return self._pre_inpainter
+        if backend == "hisam":
+            from src.stages.s4_propagation.segmentation_inpainter import (
+                SegmentationBasedInpainter,
+            )
+            logger.info("S5: loading Hi-SAM pre-composite inpainter from %s",
+                         self.config.pre_inpaint_checkpoint)
+            self._pre_inpainter = SegmentationBasedInpainter(
+                checkpoint_path=self.config.pre_inpaint_checkpoint,
+                device=self.config.pre_inpaint_device,
+                model_type=self.config.pre_inpaint_hisam_model_type,
+                mask_dilation_px=self.config.pre_inpaint_hisam_mask_dilation_px,
+                inpaint_method=self.config.pre_inpaint_hisam_inpaint_method,
+                use_patch_mode=self.config.pre_inpaint_hisam_use_patch_mode,
+            )
+            return self._pre_inpainter
+        raise ValueError(
+            f"Unknown pre_inpaint_backend: {backend!r}. "
+            f"Expected one of: 'srnet', 'hisam'."
         )
-        return self._pre_inpainter
 
     @staticmethod
     def _expand_quad_from_centroid(
@@ -324,7 +356,8 @@ class RevertStage:
 
         1. Expand the quad outward from its centroid.
         2. Warp the expanded region to a rectangle.
-        3. Run SRNet to erase any text.
+        3. Run the configured pre-composite inpainter (SRNet or Hi-SAM)
+           to erase any text.
         4. Warp the inpainted result back into the frame.
 
         Returns the modified frame (may be a new array or in-place).
