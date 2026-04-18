@@ -398,7 +398,7 @@ def test_config_override_sets_input_output_and_langs(tmp_path: Path, monkeypatch
         input_path=Path("/tmp/a.mp4"),
         output_path=Path("/tmp/b.mp4"),
         source_lang="en",
-        target_lang="zh-cn",
+        target_lang="zh-CN",
         emit=lambda e: None,
     )
 
@@ -408,7 +408,7 @@ def test_config_override_sets_input_output_and_langs(tmp_path: Path, monkeypatch
     assert cfg.input_video == "/tmp/a.mp4"
     assert cfg.output_video == "/tmp/b.mp4"
     assert cfg.translation.source_lang == "en"
-    assert cfg.translation.target_lang == "zh-cn"
+    assert cfg.translation.target_lang == "zh-CN"
 
     # And the loader was pointed at adv.yaml specifically.
     assert len(captured["yaml_paths"]) == 1

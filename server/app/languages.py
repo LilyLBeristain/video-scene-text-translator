@@ -20,7 +20,7 @@ class Language(BaseModel):
 SUPPORTED_LANGUAGES: list[Language] = [
     Language(code="en", label="English"),
     Language(code="es", label="Spanish"),
-    Language(code="zh-cn", label="Chinese (Simplified)"),
+    Language(code="zh-CN", label="Chinese (Simplified)"),
     Language(code="fr", label="French"),
     Language(code="de", label="German"),
     Language(code="ja", label="Japanese"),

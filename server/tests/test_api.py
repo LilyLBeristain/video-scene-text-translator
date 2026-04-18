@@ -240,7 +240,7 @@ def test_get_languages_returns_seven_curated_codes(storage_root: Path):
     payload = resp.json()
     assert len(payload) == 7
     codes = {lang["code"] for lang in payload}
-    assert codes == {"en", "es", "zh-cn", "fr", "de", "ja", "ko"}
+    assert codes == {"en", "es", "zh-CN", "fr", "de", "ja", "ko"}
 
 
 # ---------------------------------------------------------------------------

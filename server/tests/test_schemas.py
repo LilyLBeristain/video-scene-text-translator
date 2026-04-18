@@ -29,7 +29,7 @@ def test_language_list_has_curated_7():
     # Assert — exactly the 7 curated codes from plan.md D12
     assert len(SUPPORTED_LANGUAGES) == 7
     codes = {lang.code for lang in SUPPORTED_LANGUAGES}
-    assert codes == {"en", "es", "zh-cn", "fr", "de", "ja", "ko"}
+    assert codes == {"en", "es", "zh-CN", "fr", "de", "ja", "ko"}
 
 
 def test_is_supported():

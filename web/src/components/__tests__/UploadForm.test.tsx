@@ -28,7 +28,7 @@ import type { Language } from "@/api/schemas";
 const LANGUAGES: Language[] = [
   { code: "en", label: "English" },
   { code: "es", label: "Spanish" },
-  { code: "zh-cn", label: "Chinese (Simplified)" },
+  { code: "zh-CN", label: "Chinese (Simplified)" },
   { code: "fr", label: "French" },
   { code: "de", label: "German" },
   { code: "ja", label: "Japanese" },
