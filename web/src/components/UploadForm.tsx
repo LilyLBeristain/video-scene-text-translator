@@ -58,6 +58,55 @@ type SubmitError =
   | { kind: "lang"; message: string }
   | { kind: "other"; message: string };
 
+function errorTitle(error: SubmitError): string {
+  switch (error.kind) {
+    case "concurrent":
+      return "A job is already running";
+    case "size":
+      return "File too large";
+    case "lang":
+      return "Invalid language code";
+    default:
+      return "Upload failed";
+  }
+}
+
+function renderError(
+  error: SubmitError,
+  onRejoinActiveJob?: (jobId: string) => void,
+) {
+  // Pull activeJobId into a local const so TypeScript can narrow it to
+  // `string` through the closure — avoids an `as string` cast in the JSX.
+  const activeJobId =
+    error.kind === "concurrent" ? error.activeJobId : null;
+
+  return (
+    <Alert variant="destructive">
+      <AlertTitle>{errorTitle(error)}</AlertTitle>
+      <AlertDescription className="space-y-2">
+        <p>{error.message}</p>
+        {error.kind === "concurrent" && (
+          <p>
+            {activeJobId
+              ? `Active job id: ${activeJobId}. Rejoin it or cancel it first.`
+              : "Cancel it first or wait for it to finish."}
+          </p>
+        )}
+        {activeJobId && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onRejoinActiveJob?.(activeJobId)}
+          >
+            Rejoin
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 function errorFromApi(err: unknown): SubmitError {
   if (err instanceof ApiError) {
     if (err.status === 409) {
@@ -200,41 +249,7 @@ export function UploadForm({
           </p>
         )}
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertTitle>
-              {error.kind === "concurrent"
-                ? "A job is already running"
-                : error.kind === "size"
-                  ? "File too large"
-                  : error.kind === "lang"
-                    ? "Invalid language code"
-                    : "Upload failed"}
-            </AlertTitle>
-            <AlertDescription className="space-y-2">
-              <p>{error.message}</p>
-              {error.kind === "concurrent" && (
-                <p>
-                  {error.activeJobId
-                    ? `Active job id: ${error.activeJobId}. Rejoin it or cancel it first.`
-                    : "Cancel it first or wait for it to finish."}
-                </p>
-              )}
-              {error.kind === "concurrent" && error.activeJobId && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    onRejoinActiveJob?.(error.activeJobId as string)
-                  }
-                >
-                  Rejoin
-                </Button>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
+        {error && renderError(error, onRejoinActiveJob)}
       </CardContent>
 
       <CardFooter>
