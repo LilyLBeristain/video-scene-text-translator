@@ -1,10 +1,6 @@
 /**
  * <FailureCard> — right-column surface for the terminal "failed" phase.
  *
- * Replaces <ErrorAlert>. The old file is intentionally left in place until
- * Step 14 deletes <JobView> (which still imports it), so the test suite
- * stays green commit-by-commit (plan D4).
- *
  * Contract (plan.md, Step 12 + deferred-list):
  *   - Title is the raw `error.message`. No human-friendly mapping layer —
  *     mapping `OutOfMemoryError` → "Your GPU is too small" is out of scope.

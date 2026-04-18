@@ -11,9 +11,11 @@
  *   - Click anywhere on the drop target → opens the native file picker via
  *     a hidden `<input type="file">`.
  *   - Drag-drop → reads the first file out of `dataTransfer.files`.
- *   - Selected file: filename + MB size are rendered underneath (this box
- *     keeps the file-picked affordance for UploadForm; the new
- *     <VideoCard> is the future replacement but not yet adopted here).
+ *   - Selected file: filename + MB size are rendered underneath. In the
+ *     current flow <App> swaps Dropzone out for <VideoCard> once a file
+ *     is picked, so this box rarely renders with a non-null `currentFile`;
+ *     it stays for isolated tests and future flows that re-use <Dropzone>
+ *     directly.
  *   - Oversize warning (R2): when `currentFile.size > maxSizeBytes`, a
  *     single-line red warning appears. Matches the server's 200 MiB cap.
  *

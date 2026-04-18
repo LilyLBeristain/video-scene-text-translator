@@ -18,9 +18,9 @@
  * *after* it are forced to pending (they never ran). Tiles before it keep
  * whatever state the caller supplied (typically "done").
  *
- * Back-compat with JobView: `activeStageElapsedMs`, `currentStage`, and
- * `failedStage` are optional. JobView's existing call site passes only the
- * stages + durations and will keep compiling through the Step 14 rewrite.
+ * `activeStageElapsedMs`, `currentStage`, and `failedStage` are optional
+ * so a caller that only has the two canonical fields (`stages`,
+ * `stageDurations`) can mount the component without tick wiring.
  */
 
 import { Check, Clock } from "lucide-react";
@@ -48,7 +48,7 @@ export interface StageProgressProps {
   stages: Record<Stage, StageState>;
   stageDurations: Partial<Record<Stage, number>>;
   /** Live tick for the currently-active stage in ms. When omitted, the tick
-   *  readout is suppressed — JobView's current call site takes this path. */
+   *  readout is suppressed. */
   activeStageElapsedMs?: number;
   /** Active stage code — same info as `stages[s] === "active"`, but made
    *  explicit so the elapsed-row readout doesn't have to re-derive it. */

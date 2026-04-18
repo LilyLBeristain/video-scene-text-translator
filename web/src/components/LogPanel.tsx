@@ -35,11 +35,11 @@
  * drops the "jump to latest" chip for MVP. If we discover in practice
  * that users need a read-earlier-lines mode, Step 15 polish covers it.
  *
- * Props back-compat
- * -----------------
- * `currentStage` and `isRunning` are optional so JobView's existing
- * `<LogPanel logs={...} />` call keeps compiling. When omitted, the S3
- * hint simply doesn't render.
+ * Props
+ * -----
+ * `currentStage` and `isRunning` are optional — when omitted, the S3 hint
+ * simply doesn't render. Callers that don't need the hint (e.g. the
+ * succeeded- or failed-state log panels) pass only `logs`.
  */
 
 import { useEffect, useRef } from "react";

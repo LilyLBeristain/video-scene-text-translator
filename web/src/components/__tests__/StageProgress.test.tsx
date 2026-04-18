@@ -7,7 +7,7 @@
  *   - all five tiles render with their S# prefix and human label
  *   - done tiles show their completed duration
  *   - an active tile shows the live elapsed tick *iff* activeStageElapsedMs
- *     is provided (JobView's current call site omits it — back-compat)
+ *     is provided (callers may omit it when no live tick is available)
  *   - failedStage forces the fail styling on its tile and pending on later
  *     tiles, regardless of what the `stages` prop says
  *   - the elapsed row shows `S#/5 · MM:SS` while running and `5/5 · MM:SS`

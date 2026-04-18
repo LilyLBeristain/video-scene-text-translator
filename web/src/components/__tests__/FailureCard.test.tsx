@@ -1,7 +1,6 @@
 /**
  * Tests for <FailureCard> — the right-column surface shown when the pipeline
- * terminates with `job.error`. Replaces <ErrorAlert> (whose file is kept
- * around until Step 14 so old <JobView> still compiles).
+ * terminates with `job.error`.
  *
  * Behavior under test:
  *   1. Renders the raw `message` as a heading (no human-friendly mapping —

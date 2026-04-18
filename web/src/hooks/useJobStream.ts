@@ -400,8 +400,8 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
 
     activeJobRef.current = jobId;
     // Fresh state on every jobId change. A caller can also call reset()
-    // explicitly, but binding to the effect means a direct <JobView key>
-    // swap also does the right thing.
+    // explicitly, but binding to the effect means a direct `key` swap on
+    // the consumer also does the right thing.
     setState(initialState());
     // Any ticker from a previous jobId dies with the job. The new job
     // will start its own on the first stage_start or status-sync.
