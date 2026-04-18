@@ -1,5 +1,106 @@
 # Changelog
 
+## 2026-04-18 — Fix BPN Border Halo via Reflect-Padding (feat/mv_refine_to_s2)
+
+### Symptom
+
+With BPN enabled, every propagated ROI in the output video rendered as
+a visibly brighter blob than its surrounding unedited pixels. The
+brightness scaled monotonically with how much blur BPN predicted.
+
+### Root Cause
+
+`DifferentiableBlur.forward` called `F.conv2d(img, kern, padding=pad)`,
+which uses **zero-padding**. Convolving against zero-padded borders
+darkens the blurred output near the ROI edges: a pixel at the boundary
+integrates its normalized kernel over a window that's partially
+outside the image, and the "outside" contributes zero.
+
+The differential-blur formula `I_out = (1+w)*I - w*blurred` with `w<0`
+propagates this: interior pixels are unaffected, but border pixels pick
+up the artificial darkness.
+
+S5 then composites via `cv2.seamlessClone`, which solves Poisson with
+the source's gradient field and the destination frame's boundary
+values. The Poisson solve:
+- Anchors the composite to the frame's boundary (matches surroundings).
+- Integrates the source's gradient field inward from that boundary.
+
+Because BPN had artificially darkened the source's border, the "source
+interior minus source border" was positive, so the integrated composite
+interior sat **above** the frame's ambient — a bright halo. Stronger
+BPN (bigger effective kernel, larger |w|) → bigger border darkening →
+bigger halo.
+
+### Investigation
+
+Per-call diagnostic logging was added to `BPNPredictor.apply_blur`
+(since removed) measuring `(sigma_x, sigma_y, w, mean_before,
+mean_after, Δmean, clamp fractions)`. Initial read of 482 calls on one
+video showed all 482 Δ values negative (BPN darkening per-pixel mean
+by ~2.5% on average) — which was a red herring. User confirmed two
+key observations that pinned the mechanism:
+
+1. With sigma=31 and |w|=0.28 the ROI only looked slightly blurred
+   (kernel truncation at 41 px caps effective blur; the huge sigmas
+   from an out-of-distribution BPN checkpoint weren't the primary
+   issue).
+2. Composite border pixels matched the frame's ambient perfectly; the
+   interior sat above. This rules out a constant brightness shift in
+   the source and points at a gradient integrated from a biased
+   boundary.
+
+Together: the boundary condition was correct (Poisson enforces frame's
+ambient at the border), but the source had an artificially dark border
+that translated into a positive inward gradient integral.
+
+### Fix
+
+[code/src/models/bpn/blur.py:86-92](code/src/models/bpn/blur.py#L86-L92) — replace
+
+    F.conv2d(img_flat, kern_flat, padding=pad, groups=B * C)
+
+with
+
+    img_padded = F.pad(img_flat, (pad, pad, pad, pad), mode="reflect")
+    F.conv2d(img_padded, kern_flat, padding=0, groups=B * C)
+
+Reflect-padding mirrors the image's own pixels into the kernel support
+at the boundary, so the convolution is mean-preserving all the way to
+the edge. No more artificial dark rim; no more Poisson halo.
+
+### Verification
+
+- Per-call Δmean dropped from ~-0.025 (zero-pad) to ~-0.0001 (reflect-
+  pad) — two orders of magnitude — on the same video with identical
+  predicted params. User confirmed the halo is gone in the composite.
+- On a flat 0.5 input, reflect-padded output is 0.5000 at every pixel
+  including the corners. Zero-padded output dropped below 0.5 near the
+  border depending on sigma.
+- Border-vs-interior mean difference on a random image dropped from
+  ~0.06 at |w|=0.5 to ~0.002 (sampling noise).
+
+### Testing
+
+- New `test_bpn_blur.py` with 5 regression tests under
+  `TestBorderPreservation` (flat-image exact preservation, random-image
+  border-vs-interior bound, identity at w=0) and `TestShapeContract`
+  (shape, [0, 1] range under aggressive sharpen).
+- 438 → 443 tests passing.
+
+### Note on BPN Predictions
+
+The diagnostic surfaced a secondary issue worth revisiting later: the
+current checkpoint predicts `sigma_x` up to 35 (median 15) and `|w|`
+up to 0.88, far outside the Stage 1 training range (sigma ∈ [0.3, 1.8],
+|w| ≤ 0.4). The fixed 41-px kernel absorbs most of the damage by
+truncating the Gaussian support, but the predictions still suggest
+Stage 2 self-supervised training drifted to explain misalignment as
+blur. With S2 refinement now handling geometric error, retraining BPN
+(or optionally clamping sigma/|w| to Stage 1 range at inference) is a
+worthwhile follow-up. Not done in this commit; `adv.yaml` leaves
+`use_bpn: false` by default.
+
 ## 2026-04-18 — Alignment Refiner Moved from S5 to S2 (feat/mv_refine_to_s2)
 
 ### Why
