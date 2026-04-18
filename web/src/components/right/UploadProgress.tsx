@@ -102,7 +102,7 @@ export function UploadProgress({
       {/* description paragraph — explains what happens once upload finishes */}
       <p className="max-w-md text-center text-sm text-muted-foreground">
         Pipeline will start once the server finishes receiving the file.
-        Stages, log, and ETA appear then.
+        Stages and log appear then.
       </p>
     </div>
   );
