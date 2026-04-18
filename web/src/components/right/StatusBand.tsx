@@ -1,14 +1,12 @@
 /**
- * <StatusBand> — thin header row shown at the top of the right column in
- * every phase. Two parts:
+ * <StatusBand> — thin header row at the top of the right column.
  *
- *   - Left label (constant): "PIPELINE · ONE WINDOW" in caps mono.
- *   - Right-aligned status pill whose text + color change with `kind`.
+ *   - Left: caps-mono eyebrow label that describes the current phase
+ *     ("UPLOADING", "PIPELINE · ONE WINDOW", "RESULT · SAME WINDOW", etc).
+ *   - Right: status pill whose text + color change with `kind`.
  *
- * Color tokens come from the slate palette in globals.css. The "running"
- * kind prepends a pulsing dot glyph; the `prefers-reduced-motion` media
- * query in globals.css already dampens `animate-pulse` globally so no
- * per-component bail-out is needed.
+ * The "running" / "failed" / "blocked" kinds prepend a pulsing dot glyph.
+ * prefers-reduced-motion (globals.css) dampens animate-pulse globally.
  */
 
 import { cn } from "@/lib/utils";
@@ -57,14 +55,25 @@ const PILLS: Record<StatusBandKind, PillSpec> = {
   blocked: { label: "BLOCKED", dot: true, className: WARN },
 };
 
+// Phase-specific eyebrow shown on the left side of the band. Unlike the pill,
+// these are descriptive sentences — they name the surface the user is on.
+const EYEBROW: Record<StatusBandKind, string> = {
+  idle: "READY WHEN YOU ARE",
+  uploading: "UPLOADING",
+  connecting: "CONNECTING",
+  running: "PIPELINE \u00B7 ONE WINDOW",
+  succeeded: "RESULT \u00B7 SAME WINDOW",
+  failed: "FAILURE \u00B7 SAME WINDOW",
+  blocked: "ACTION REQUIRED",
+};
+
 export function StatusBand({ kind }: StatusBandProps): JSX.Element {
   const pill = PILLS[kind];
+  const eyebrow = EYEBROW[kind];
 
   return (
     <div className="flex items-center justify-between border-b border-border px-5 py-3 font-mono text-[11px] uppercase tracking-wider">
-      <span className="text-muted-foreground">
-        PIPELINE {"\u00B7"} ONE WINDOW
-      </span>
+      <span className="text-muted-foreground">{eyebrow}</span>
       <span
         className={cn(
           "rounded px-2 py-0.5",

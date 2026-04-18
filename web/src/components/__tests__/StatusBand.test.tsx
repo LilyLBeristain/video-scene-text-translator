@@ -1,35 +1,30 @@
 /**
  * Tests for <StatusBand> — the thin header row at the top of the right
- * column that shows "PIPELINE · ONE WINDOW" on the left and a status pill
- * on the right.
- *
- * The pill's label + styling varies by `kind`; the left label is constant.
- * Layout / color tokens are presentational and not covered here — we only
- * pin the user-visible text contract per kind.
+ * column that renders a status pill whose label + color change per `kind`.
+ * Layout / color tokens are presentational and not covered here.
  */
 
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import { StatusBand } from "../right/StatusBand";
-import type { StatusBandKind } from "../right/StatusBand";
 
 describe("<StatusBand>", () => {
-  it("always renders the 'PIPELINE · ONE WINDOW' left label", () => {
-    // Sweep every kind — the left label never changes.
-    const kinds: StatusBandKind[] = [
-      "idle",
-      "uploading",
-      "connecting",
-      "running",
-      "succeeded",
-      "failed",
-      "blocked",
+  it("renders the phase-specific eyebrow label", () => {
+    const cases: Array<[import("../right/StatusBand").StatusBandKind, RegExp]> = [
+      ["idle", /READY WHEN YOU ARE/i],
+      ["uploading", /^UPLOADING$/],
+      ["connecting", /CONNECTING/i],
+      ["running", /PIPELINE.+ONE WINDOW/i],
+      ["succeeded", /RESULT.+SAME WINDOW/i],
+      ["failed", /FAILURE.+SAME WINDOW/i],
+      ["blocked", /ACTION REQUIRED/i],
     ];
-
-    for (const kind of kinds) {
+    for (const [kind, rx] of cases) {
       const { unmount } = render(<StatusBand kind={kind} />);
-      expect(screen.getByText(/PIPELINE . ONE WINDOW/i)).toBeInTheDocument();
+      // Some labels collide with their pill text (e.g. CONNECTING); just
+      // assert the text appears at least once in the band.
+      expect(screen.getAllByText(rx).length).toBeGreaterThanOrEqual(1);
       unmount();
     }
   });
@@ -47,7 +42,8 @@ describe("<StatusBand>", () => {
 
   it("renders 'CONNECTING' when kind=connecting", () => {
     render(<StatusBand kind="connecting" />);
-    expect(screen.getByText("CONNECTING")).toBeInTheDocument();
+    // Both the eyebrow (left) and the pill (right) carry "CONNECTING".
+    expect(screen.getAllByText("CONNECTING").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders 'LIVE' when kind=running", () => {
