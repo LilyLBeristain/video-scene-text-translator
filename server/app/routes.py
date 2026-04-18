@@ -145,10 +145,8 @@ async def create_job(
             while chunk := await video.read(_UPLOAD_CHUNK):
                 total += len(chunk)
                 if total > MAX_UPLOAD_BYTES:
-                    # Close + clean before raising; FastAPI's exception
-                    # handler will never see the half-written file.
-                    fh.close()
-                    storage.cleanup_job(job_id)
+                    # Let the `with` block handle close on unwind; both
+                    # cleanup paths below unlink the partial file.
                     raise HTTPException(
                         status_code=413,
                         detail=(
@@ -157,6 +155,10 @@ async def create_job(
                     )
                 fh.write(chunk)
     except HTTPException:
+        # Oversize / cap-breach: the file handle was closed by the `with`
+        # block's __exit__ on unwind. Clean the per-job directory so the
+        # half-written file and its parent don't leak.
+        storage.cleanup_job(job_id)
         raise
     except Exception:
         # Unexpected I/O error — nuke the partial upload so we don't leak
