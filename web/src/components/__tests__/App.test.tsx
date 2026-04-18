@@ -287,8 +287,8 @@ describe("<App> state machine", () => {
     // BLOCKED pill on the right.
     expect(screen.getByText(/^BLOCKED$/)).toBeInTheDocument();
 
-    // The blocking id prefix renders (first 8 chars of "blocking-xyz").
-    expect(screen.getByText(/blocking/)).toBeInTheDocument();
+    // The blocking id prefix renders in both RejoinCard and StatusBand.
+    expect(screen.getAllByText(/blocking/).length).toBeGreaterThanOrEqual(1);
 
     // /status was fetched for the blocking id.
     await waitFor(() => {

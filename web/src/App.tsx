@@ -699,9 +699,14 @@ function NonActiveRightColumn({
         ? "uploading"
         : "blocked";
 
+  // Only the rejoin phase has a user-visible job id (the blocking job);
+  // uploading has no id yet, idle obviously none.
+  const jobIdForBand =
+    state.phase === "rejoin" ? state.blockingJobId : undefined;
+
   return (
     <>
-      <StatusBand kind={kind} />
+      <StatusBand kind={kind} jobId={jobIdForBand} />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
         {state.phase === "idle" && (
           <>
@@ -843,7 +848,7 @@ function renderActiveFileSlot(state: ActiveState): JSX.Element {
     <section>
       <SectionEyebrow
         label="Input"
-        pill={{ text: "Locked", kind: "neutral" }}
+        pill={{ text: "Locked", kind: "warn" }}
       />
       {state.file !== null ? (
         <VideoCard
@@ -949,7 +954,7 @@ function ActiveRightColumn({
 
   return (
     <>
-      <StatusBand kind={kind} />
+      <StatusBand kind={kind} jobId={jobId} />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
         <StageProgress
           stages={streamState.stages}
