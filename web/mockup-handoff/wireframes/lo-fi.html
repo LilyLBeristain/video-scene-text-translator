@@ -1,0 +1,2038 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scene Text Translator — Wireframes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Caveat:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1e22;
+    --ink-soft: #3b434a;
+    --ink-faint: #7a848c;
+    --ink-ghost: #b8bfc5;
+    --paper: #f6f5ef;
+    --paper-2: #ecebe3;
+    --rule: #2a3136;
+    /* cool cyan accent, single chroma family */
+    --accent: oklch(0.62 0.12 220);
+    --accent-soft: oklch(0.92 0.04 220);
+    --accent-ring: oklch(0.75 0.09 220 / 0.4);
+    --warn: oklch(0.72 0.11 70);
+    --warn-soft: oklch(0.94 0.05 70);
+    --err: oklch(0.58 0.14 28);
+    --err-soft: oklch(0.93 0.05 28);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Kalam', 'Comic Sans MS', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    background-image:
+      linear-gradient(var(--paper-2) 1px, transparent 1px),
+      linear-gradient(90deg, var(--paper-2) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: -1px -1px;
+    min-height: 100vh;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .hand { font-family: 'Caveat', cursive; }
+
+  /* global chrome */
+  header.page {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 28px 40px 18px;
+    border-bottom: 2px dashed var(--ink);
+    gap: 24px;
+  }
+  header.page h1 {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  header.page .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-top: 4px;
+  }
+  header.page .stamp {
+    border: 2px solid var(--ink);
+    padding: 4px 10px;
+    transform: rotate(-3deg);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    background: var(--paper);
+    color: var(--ink);
+    text-transform: uppercase;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    padding: 18px 40px 0;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .tab {
+    font-family: 'Kalam', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 6px 14px;
+    cursor: pointer;
+    color: var(--ink);
+    position: relative;
+    transition: transform 0.08s ease;
+  }
+  .tab:hover { transform: translate(-1px,-1px); box-shadow: 2px 2px 0 var(--ink); }
+  .tab.active {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .tab .key {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    opacity: 0.6;
+    margin-right: 6px;
+  }
+  .tab-spacer { flex: 1; }
+  .legend {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  /* sheet */
+  main.sheet {
+    padding: 24px 40px 80px;
+    max-width: 1480px;
+    margin: 0 auto;
+  }
+  .sheet-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 18px;
+    gap: 20px;
+  }
+  .sheet-head h2 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 700;
+  }
+  .sheet-head .notes {
+    font-family: 'Caveat', cursive;
+    font-size: 20px;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    line-height: 1.2;
+  }
+  .sheet-head .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* wireframe primitives */
+  .box {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 14px 16px;
+    position: relative;
+  }
+  .box.dashed { border-style: dashed; }
+  .box.soft { background: var(--paper-2); }
+  .box.dim { opacity: 0.45; }
+  .box.accent {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .label .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 2px 6px;
+    border: 1px solid var(--ink-faint);
+    color: var(--ink-faint);
+    border-radius: 2px;
+    letter-spacing: 1px;
+  }
+  .label .badge.on { color: var(--accent); border-color: var(--accent); }
+  .label .badge.ok { color: oklch(0.55 0.12 150); border-color: oklch(0.55 0.12 150); }
+  .label .badge.warn { color: var(--warn); border-color: var(--warn); }
+  .label .badge.err { color: var(--err); border-color: var(--err); }
+
+  h3.title {
+    margin: 0 0 2px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .hint {
+    font-family: 'Caveat', cursive;
+    font-size: 18px;
+    color: var(--ink-soft);
+    line-height: 1.15;
+  }
+
+  /* handwritten pencil arrows / annotations */
+  .annotate {
+    position: absolute;
+    font-family: 'Caveat', cursive;
+    font-size: 18px;
+    color: var(--accent);
+    pointer-events: none;
+    line-height: 1.1;
+    max-width: 200px;
+  }
+
+  /* drop zone */
+  .drop {
+    border: 2px dashed var(--ink);
+    padding: 28px 16px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 8px,
+      var(--paper-2) 8px,
+      var(--paper-2) 9px
+    );
+  }
+  .drop .big { font-family: 'Kalam', sans-serif; font-size: 18px; color: var(--ink); margin-bottom: 4px; font-weight: 700; }
+  .drop .tiny { font-size: 10px; margin-top: 6px; color: var(--ink-faint); }
+
+  /* input stubs */
+  .input {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 8px 10px;
+    font-family: 'Kalam', sans-serif;
+    font-size: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .input .caret { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--ink-faint); }
+  .field-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
+
+  .btn {
+    border: 2px solid var(--ink);
+    padding: 10px 16px;
+    font-family: 'Kalam', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    background: var(--paper);
+    color: var(--ink);
+    cursor: pointer;
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.accent { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn.ghost { background: transparent; }
+  .btn.disabled { opacity: 0.4; cursor: not-allowed; background: var(--paper-2); }
+  .btn.danger { color: var(--err); border-color: var(--err); }
+  .btn .k { font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: 0.5; }
+
+  /* stages */
+  .stages {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .stage {
+    border: 2px solid var(--ink);
+    padding: 10px 8px;
+    text-align: center;
+    position: relative;
+    background: var(--paper);
+  }
+  .stage .no {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 1px;
+  }
+  .stage .nm { font-family: 'Kalam', sans-serif; font-weight: 700; font-size: 15px; margin-top: 2px; }
+  .stage .dur { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-faint); margin-top: 4px; }
+  .stage.done { background: var(--paper-2); }
+  .stage.done .dur { color: oklch(0.5 0.1 150); }
+  .stage.done .no::before { content: "✓ "; color: oklch(0.5 0.12 150); }
+  .stage.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .stage.active .nm { color: var(--accent); }
+  .stage.active .dur::before {
+    content: "●";
+    color: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+    margin-right: 4px;
+  }
+  .stage.pending { color: var(--ink-ghost); background: transparent; }
+  .stage.pending .nm { color: var(--ink-ghost); }
+  .stage.fail {
+    background: var(--err-soft);
+    border-color: var(--err);
+    box-shadow: 0 0 0 3px oklch(0.78 0.09 28 / 0.4);
+  }
+  .stage.fail .no { color: var(--err); }
+  .stage.fail .no::before { content: "✗ "; color: var(--err); font-weight: 700; }
+  .stage.fail .nm { color: var(--err); }
+  .stage.fail .dur { color: var(--err); font-weight: 700; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage.active .dur::before { animation: none; }
+  }
+
+  /* log */
+  .log {
+    background: var(--ink);
+    color: var(--paper-2);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 12px 14px;
+    line-height: 1.55;
+    overflow: auto;
+    border: 2px solid var(--ink);
+  }
+  .log .t { color: #8aa7b3; }
+  .log .i { color: #cfe7ef; }
+  .log .w { color: #e5c27a; }
+  .log .e { color: #f08a7a; }
+  .log .dim { opacity: 0.55; }
+  .log .cur { display: inline-block; width: 8px; height: 13px; background: var(--accent); vertical-align: text-bottom; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* video placeholder */
+  .video-ph {
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--ink) 0,
+      var(--ink) 2px,
+      #2c3338 2px,
+      #2c3338 14px
+    );
+    color: var(--paper);
+    aspect-ratio: 16/9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    position: relative;
+    border: 2px solid var(--ink);
+  }
+  .video-ph::after {
+    content: "▶";
+    position: absolute;
+    font-size: 48px;
+    color: var(--paper);
+    opacity: 0.85;
+  }
+  .video-ph .cap {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 10px;
+    opacity: 0.7;
+  }
+
+  /* meter */
+  .meter {
+    height: 8px;
+    background: var(--paper-2);
+    border: 1px solid var(--ink);
+    position: relative;
+    overflow: hidden;
+  }
+  .meter > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    width: 34%;
+    position: relative;
+  }
+  .meter.stripe > span {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--accent),
+      var(--accent) 6px,
+      oklch(0.72 0.1 220) 6px,
+      oklch(0.72 0.1 220) 12px
+    );
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  .kv dt { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 1px; }
+  .kv dd { margin: 0; color: var(--ink); }
+
+  /* layout grids */
+  .grid-2col {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 24px;
+  }
+  .grid-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .grid-cockpit {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 14px;
+  }
+  .grid-console {
+    display: grid;
+    grid-template-columns: 320px 1fr 320px;
+    gap: 20px;
+  }
+
+  /* tweaks panel */
+  #tweaks {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 300px;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink);
+    z-index: 50;
+    font-family: 'Kalam', sans-serif;
+    display: none;
+  }
+  #tweaks.on { display: block; }
+  #tweaks header {
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #tweaks header .x {
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  #tweaks .body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #tweaks .row .name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  #tweaks .seg {
+    display: grid;
+    gap: 2px;
+    border: 1.5px solid var(--ink);
+  }
+  #tweaks .seg.cols-2 { grid-template-columns: 1fr 1fr; }
+  #tweaks .seg.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  #tweaks .seg button {
+    font-family: 'Kalam', sans-serif;
+    background: var(--paper);
+    border: 0;
+    padding: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ink);
+    border-right: 1.5px solid var(--ink);
+  }
+  #tweaks .seg button:last-child { border-right: 0; }
+  #tweaks .seg.cols-2 button:nth-child(2n) { border-right: 0; }
+  #tweaks .seg button.on { background: var(--ink); color: var(--paper); }
+  #tweaks .seg button:hover:not(.on) { background: var(--paper-2); }
+
+  /* state-specific helpers */
+  .note-arrow {
+    font-family: 'Caveat', cursive;
+    font-size: 18px;
+    color: var(--accent);
+    line-height: 1.1;
+    padding: 4px 0;
+  }
+
+  .summary-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 2px solid var(--ink);
+    background: var(--paper-2);
+    padding: 10px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .summary-bar .grp { display: flex; gap: 14px; align-items: center; }
+  .summary-bar b { font-family: 'Kalam', sans-serif; font-size: 14px; }
+
+  .rejoin-block {
+    border: 2px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 14px;
+  }
+  .rejoin-block .title { font-weight: 700; display: flex; align-items: center; gap: 8px; font-size: 16px; }
+  .rejoin-block .title::before { content: "!"; width: 22px; height: 22px; border-radius: 50%; background: var(--warn); color: white; display: inline-flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+
+  /* corner fold aesthetic */
+  .sheet-corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 22px;
+    height: 22px;
+    background: linear-gradient(135deg, transparent 50%, var(--paper-2) 50%);
+    border-left: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+  }
+
+  /* responsive-ish for narrower screens */
+  @media (max-width: 1180px) {
+    .grid-2col { grid-template-columns: 1fr; }
+    .grid-2col-equal { grid-template-columns: 1fr; height: auto !important; }
+    .grid-console { grid-template-columns: 1fr; }
+    .col-panel { height: auto !important; min-height: 0; }
+  }
+
+  /* unequal split (sheet A refined) */
+  .grid-2col-equal {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 20px;
+    height: 760px;
+  }
+  .col-panel {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .col-panel.accent {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  /* show/hide wireframes */
+  .sheet { display: none; }
+  .sheet.active { display: block; }
+
+  /* subtle "tap here" markers */
+  .mark {
+    display: inline-block;
+    border: 1.5px solid var(--accent);
+    color: var(--accent);
+    padding: 0 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    border-radius: 2px;
+    margin-left: 6px;
+    letter-spacing: 1px;
+  }
+
+  /* toggle tweaks button */
+  #toggleTweaks {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 40;
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 8px 14px;
+    font-family: 'Kalam', sans-serif;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  #toggleTweaks.hidden { display: none; }
+
+  /* shared top info bar for state */
+  .state-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border: 2px solid var(--ink);
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    background: var(--paper);
+  }
+  .state-banner .left { display: flex; align-items: center; gap: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .state-banner .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-faint); }
+  .state-banner.running .dot { background: var(--accent); animation: pulse 1.2s infinite; }
+  .state-banner.done .dot { background: oklch(0.55 0.12 150); }
+  .state-banner.failed .dot { background: var(--err); }
+  .state-banner .jobid { color: var(--ink-faint); }
+
+  /* tile helpers */
+  .tile-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .tile-head h4 { margin: 0; font-size: 16px; font-weight: 700; }
+  .tile-head .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+
+  /* small icons drawn in CSS */
+  .icon-file {
+    display: inline-block;
+    width: 14px;
+    height: 18px;
+    border: 1.5px solid currentColor;
+    position: relative;
+  }
+  .icon-file::before {
+    content: "";
+    position: absolute;
+    top: -1.5px;
+    right: -1.5px;
+    width: 6px;
+    height: 6px;
+    background: var(--paper);
+    border-left: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+  }
+
+  .scroll-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    text-align: right;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <div style="min-width:0; flex:1;">
+    <h1 style="line-height:1.05;">Dashboard Wireframes</h1>
+    <div class="sub">SCENE TEXT TRANSLATOR · 4 LAYOUTS · LO-FI · V1</div>
+  </div>
+  <div class="stamp">Wireframe · not final</div>
+</header>
+
+<div class="tabs" id="tabs">
+  <button class="tab active" data-sheet="A"><span class="key">1</span>A · Split Dashboard</button>
+  <button class="tab" data-sheet="A2"><span class="key">2</span>A2 · Job-Ticket Left</button>
+  <button class="tab" data-sheet="B"><span class="key">3</span>B · Stacked Focus</button>
+  <button class="tab" data-sheet="C"><span class="key">4</span>C · Cockpit Grid</button>
+  <button class="tab" data-sheet="D"><span class="key">5</span>D · Console-First</button>
+  <div class="tab-spacer"></div>
+  <div class="legend">state → <span id="stateLabel" class="mono">running</span> · tweak me ↘</div>
+</div>
+
+<!-- ============ SHEET A · SPLIT (refined) ============ -->
+<main class="sheet active" data-sheet="A">
+  <div class="sheet-head">
+    <div>
+      <h2>A · Split Dashboard <span style="font-size:14px; color:var(--ink-faint); font-weight:400; font-family:'JetBrains Mono',monospace;">refined</span></h2>
+      <div class="notes">Two equal columns, equal height. Left is setup + inline rejoin. Right is the single progress/result window — the stage bar persists as a timeline once the result is ready.</div>
+    </div>
+    <div class="meta">1440 × 860 · two equal columns</div>
+  </div>
+
+  <div class="state-banner" id="banner-A">
+    <div class="left">
+      <span class="dot"></span>
+      <span><b class="mono" id="stateA">RUNNING</b></span>
+      <span class="jobid">job · <span id="jobA">7ca09ebb</span></span>
+      <span id="elapsedA">elapsed 00:42</span>
+    </div>
+    <div class="left">
+      <span class="note-arrow">↳ one job at a time on this server</span>
+    </div>
+  </div>
+
+  <div class="grid-2col-equal">
+    <!-- LEFT: setup column -->
+    <div class="col-panel" id="leftA">
+      <div>
+        <div class="label">IDENTITY</div>
+        <h3 class="title" style="margin-top:2px;">Scene Text Translator</h3>
+        <div class="hint">Upload · pick 2 languages · get it back, rewritten.</div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="label">
+        SETUP
+        <span class="badge on" id="formBadgeA">READY</span>
+      </div>
+
+      <div class="drop" id="dropA">
+        <div class="big">⬆  Drop video here</div>
+        or click to pick · MP4 / MOV / WebM / AVI
+        <div class="tiny">≤ 200 MB · one file</div>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="box soft" id="fileSummary-A" style="padding:10px 12px;">
+        <dl class="kv" style="grid-template-columns:auto 1fr;">
+          <dt>file</dt><dd>interview_cut_v3.mp4</dd>
+          <dt>size</dt><dd>142.6 MB</dd>
+        </dl>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <!-- merged languages box per your sketch -->
+      <div class="box" style="padding:12px 14px;">
+        <div class="field-label">source language</div>
+        <div class="input" style="margin-bottom:10px;"><span>English</span><span class="caret">▾</span></div>
+        <div class="field-label">target language</div>
+        <div class="input"><span>Spanish</span><span class="caret">▾</span></div>
+      </div>
+
+      <!-- rejoin banner moved to right column -->
+
+      <div style="flex:1"></div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="btn primary" id="submitA" style="width:100%">Start translation</button>
+        <div class="hint" id="helpA" style="font-size:14px; color:var(--ink-faint);">disabled while a job is running · form unlocks on terminal state</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: progress / result console -->
+    <div class="col-panel accent" id="rightA">
+      <div class="label">
+        <span id="rightLabelA">PROGRESS · ONE WINDOW</span>
+        <span class="badge on" id="progressBadgeA">LIVE</span>
+      </div>
+
+      <!-- rejoin banner (shown only in rejoin state, above stages) -->
+      <div id="rejoinBannerA" class="rejoin-block" style="display:none; margin-bottom:14px;">
+        <div class="title">Job already running</div>
+        <div class="hint" style="margin-top:4px;">Server is busy with <b class="mono">7ca09ebb</b> · S3 of 5. You are now watching its progress.</div>
+      </div>
+
+      <!-- stages (persistent; becomes timeline in succeeded; hidden in idle) -->
+      <div class="stages" id="stagesA">
+        <div class="stage done" id="stageS1"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+        <div class="stage done" id="stageS2"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+        <div class="stage active" id="stageS3"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">32s</div></div>
+        <div class="stage pending" id="stageS4"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+        <div class="stage pending" id="stageS5"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div id="elapsedRowA" style="display:flex; gap:14px; align-items:center; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft);">
+        <span>⏱ elapsed <b id="elA">00:42</b></span>
+        <span id="etaWrapA">· est. remaining <b id="estA">~1:10</b> <span id="etaNote" style="color:var(--ink-faint)">(heuristic)</span></span>
+        <div class="meter stripe" id="meterA" style="flex:1; min-width: 120px;"><span style="width:40%"></span></div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <!-- MAIN body: log OR video OR failure · flex fills remaining -->
+      <div id="rightBodyA" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        <!-- log (running) -->
+        <div id="logWrapA" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+          <div class="tile-head">
+            <h4>Live log</h4>
+            <span class="tag">SSE · 3 severities · scroll pauses autofollow</span>
+          </div>
+          <div class="log" id="logA" style="flex:1; min-height:0;">
+            <div><span class="t">[22:30:12]</span> <span class="i">INFO</span> Loading video: …/7ca09ebb/1-origin.mp4</div>
+            <div><span class="t">[22:30:13]</span> <span class="i">INFO</span> Loaded 178 frames (30.0 fps, 1080×1920)</div>
+            <div><span class="t">[22:30:13]</span> <span class="i">INFO</span> === Stage 1: Detection &amp; Selection ===</div>
+            <div><span class="t">[22:30:17]</span> <span class="i">INFO</span> S1: done · 4 regions · 4.2s</div>
+            <div><span class="t">[22:30:17]</span> <span class="i">INFO</span> === Stage 2: Frontalize ===</div>
+            <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> S2: done · 4 crops · 6.1s</div>
+            <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> === Stage 3: Edit (AI model) ===</div>
+            <div><span class="t">[22:30:41]</span> <span class="w">WARN</span> S3: model warmup exceeded 15s · proceeding</div>
+            <div><span class="t">[22:30:54]</span> <span class="i">INFO</span> S3: region 2/4 rewritten<span class="cur"></span></div>
+            <div class="dim"><span class="t">··· silence is OK. Stage 3 can pause for minutes ···</span></div>
+          </div>
+          <div class="scroll-hint">↕ scroll · autoscroll pauses on interaction</div>
+        </div>
+
+        <!-- result (succeeded) -->
+        <div id="resultWrapA" style="display:none; flex:1; flex-direction:column; min-height:0; gap:10px;">
+          <div class="video-ph" style="flex:1;"><span class="cap">[translated.mp4 · en→es]</span></div>
+          <div style="display:flex; gap:10px; flex-wrap: wrap;">
+            <button class="btn accent">⬇ Download</button>
+            <span class="hint" style="font-size:14px; color:var(--ink-faint); align-self:center;">← submit another / delete in left column</span>
+          </div>
+        </div>
+
+        <!-- failure -->
+        <div id="failWrapA" style="display:none; flex:1; flex-direction:column; min-height:0; gap:10px;">
+          <div class="box" style="border-color:var(--err); background: var(--err-soft); flex:1; overflow:auto;">
+            <div class="label"><span style="color:var(--err)">PIPELINE CRASHED</span></div>
+            <h3 class="title" style="color:var(--err)">CUDA out of memory at Stage 3</h3>
+            <div class="hint">Tried to allocate 2.3 GiB on a busy GPU.</div>
+            <details style="margin-top:10px;">
+              <summary class="mono" style="font-size:11px; cursor:pointer; color:var(--ink-soft)">show traceback</summary>
+              <pre class="log" style="margin-top:6px; max-height:140px;">Traceback (most recent call last):
+  File "pipeline/edit.py", line 88, in rewrite
+    out = model.generate(…)
+torch.cuda.OutOfMemoryError: tried to allocate 2.3 GiB</pre>
+            </details>
+          </div>
+          <div class="hint" style="font-size:14px; color:var(--ink-faint);">← submit another / delete in left column</div>
+        </div>
+
+        <!-- idle placeholder -->
+        <div id="idleWrapA" style="display:none; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:14px;">
+          <div style="width:64px; height:64px; border:2px dashed var(--ink-ghost); display:flex; align-items:center; justify-content:center; font-size:28px; color:var(--ink-ghost);">◻</div>
+          <div class="mono" style="font-size:11px; color:var(--ink-faint); letter-spacing:2px;">WAITING FOR A JOB</div>
+          <div class="hint" style="max-width:42ch; color:var(--ink-soft);">Pick a file and hit <b>Start translation</b> on the left. Stages, log, and the result will all appear in this window.</div>
+        </div>
+
+        <!-- upload panel (uploading state) -->
+        <div id="uploadWrapA" style="display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:18px;">
+          <div class="mono" style="font-size:11px; color:var(--ink-faint); letter-spacing:2px;">UPLOADING TO SERVER</div>
+          <div style="width:80%; max-width:440px;">
+            <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:12px; margin-bottom:8px;">
+              <span><b>64%</b></span>
+              <span style="color:var(--ink-soft);">91.2 / 142.6 MB · 8.4 MB/s</span>
+            </div>
+            <div class="meter stripe" style="width:100%; height:10px;"><span style="width:64%"></span></div>
+            <div class="mono" style="font-size:10px; color:var(--ink-faint); margin-top:10px; letter-spacing:1px;">~ 6s remaining</div>
+          </div>
+          <div class="hint" style="max-width:42ch; color:var(--ink-soft);">Pipeline will start once the server finishes receiving the file. Stages, log, and ETA appear then.</div>
+        </div>
+
+        <!-- rejoin decision panel (rejoin state) -->
+        <div id="rejoinPanelA" style="display:none; flex:1; flex-direction:column; justify-content:flex-start; gap:16px;">
+          <div class="rejoin-block" style="padding:20px;">
+            <div class="label" style="color:var(--err); margin-bottom:8px;">
+              <span style="color:var(--err)">● ANOTHER JOB IS RUNNING</span>
+            </div>
+            <h3 class="title" style="margin-bottom:6px;">Server is busy</h3>
+            <div class="hint" style="margin-bottom:16px;">Only one job at a time on this server. Your file hasn't been uploaded — it's waiting locally.</div>
+            <dl class="kv" style="grid-template-columns:auto 1fr; row-gap:6px; margin-bottom:18px;">
+              <dt>running job</dt><dd class="mono">7ca09ebb</dd>
+              <dt>stage</dt><dd>S3 · Edit <span style="color:var(--ink-faint)">(of 5)</span></dd>
+              <dt>started</dt><dd>22:30:12 <span style="color:var(--ink-faint)">· 00:42 ago</span></dd>
+              <dt>est. remaining</dt><dd class="etaLine">~1:10 <span style="color:var(--ink-faint)">(heuristic)</span></dd>
+            </dl>
+            <button class="btn accent" id="rejoinBtnA" style="width:100%; font-size:15px;">Rejoin running job →</button>
+            <div class="hint" style="margin-top:10px; font-size:13px; color:var(--ink-faint); text-align:center;">or wait for the server to free up · your file will stay queued</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; display:flex; gap: 24px; flex-wrap:wrap;">
+    <div class="hint">✎ columns are equal width AND equal height — right column <i>swaps its body</i> (log → video → error) instead of resizing.</div>
+    <div class="hint">✎ stages persist as a timeline in the result state — all ✓, durations readable.</div>
+    <div class="hint">✎ rejoin is inline only (matches current <code>UploadForm</code> 409 path).</div>
+  </div>
+</main>
+
+<!-- ============ SHEET A2 · JOB-TICKET LEFT ============ -->
+<main class="sheet" data-sheet="A2">
+  <div class="sheet-head">
+    <div>
+      <h2>A2 · Job-Ticket Left <span style="font-size:14px; color:var(--ink-faint); font-weight:400; font-family:'JetBrains Mono',monospace;">left column redesigned</span></h2>
+      <div class="notes">Same split dashboard as A, but the left column is rethought. The video <i>becomes</i> the central object (replay the source while the job runs). Language pair is one line, not a stack. Drop zone is loud only when empty. Right column is identical to A.</div>
+    </div>
+    <div class="meta">1440 × 860 · narrow-left split</div>
+  </div>
+
+  <div class="state-banner" id="banner-A2">
+    <div class="left">
+      <span class="dot"></span>
+      <span><b class="mono" id="stateA2">RUNNING</b></span>
+      <span class="jobid">job · <span class="mono">7ca09ebb</span></span>
+      <span>elapsed 00:42</span>
+    </div>
+    <div class="left">
+      <span class="note-arrow">↳ left = command · right = observation</span>
+    </div>
+  </div>
+
+  <div class="grid-2col-equal">
+    <!-- LEFT: job ticket -->
+    <div class="col-panel" id="leftA2">
+      <div>
+        <div class="label">IDENTITY</div>
+        <h3 class="title" style="margin-top:2px;">Scene Text Translator</h3>
+        <div class="hint">Upload · pick 2 languages · get it back, rewritten.</div>
+      </div>
+
+      <div style="height:14px"></div>
+
+      <div class="label">
+        INPUT
+        <span class="badge on" id="formBadgeA2">READY</span>
+      </div>
+
+      <!-- EMPTY state: big drop zone -->
+      <div class="drop" id="dropA2" style="display:none; flex:1; min-height:220px; flex-direction:column; justify-content:center;">
+        <div class="big">⬆  Drop video here</div>
+        or click to pick · MP4 / MOV / WebM / AVI
+        <div class="tiny">≤ 200 MB · one file</div>
+      </div>
+
+      <!-- FILLED state: video player becomes the anchor -->
+      <div id="videoCardA2" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        <div class="video-ph" style="flex:1; min-height:200px; position:relative;">
+          <span class="cap">[input preview · interview_cut_v3.mp4]</span>
+          <!-- fake play overlay -->
+          <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
+            <div style="width:54px; height:54px; border:2px solid var(--ink); background:var(--paper); display:flex; align-items:center; justify-content:center; font-size:18px;">▶</div>
+          </div>
+          <!-- replace link top-right -->
+          <a href="#" onclick="return false;" style="position:absolute; top:10px; right:10px; font-family:'JetBrains Mono',monospace; font-size:10px; background:var(--paper); padding:4px 8px; border:1.5px solid var(--ink); color:var(--ink); text-decoration:none;">↺ replace</a>
+        </div>
+        <!-- fake scrubber + controls -->
+        <div style="margin-top:8px; display:flex; gap:10px; align-items:center; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft);">
+          <span>0:14</span>
+          <div class="meter" style="flex:1;"><span style="width:22%; background:var(--ink);"></span></div>
+          <span>1:03</span>
+        </div>
+        <div style="margin-top:6px; display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-faint);">
+          <span>interview_cut_v3.mp4</span>
+          <span>142.6 MB · 30 fps · 1080×1920</span>
+        </div>
+      </div>
+
+      <div style="height:14px"></div>
+
+      <!-- language pair as ONE line -->
+      <div class="label">LANGUAGES</div>
+      <div class="box" style="padding:14px 16px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="input" style="flex:1; cursor:pointer;"><span style="font-size:15px;"><b>English</b></span><span class="caret">▾</span></div>
+          <button title="swap" style="background:var(--paper); border:1.5px solid var(--ink); width:34px; height:34px; font-size:14px; cursor:pointer; font-family:'JetBrains Mono',monospace;">⇄</button>
+          <div class="input" style="flex:1; cursor:pointer;"><span style="font-size:15px;"><b>Spanish</b></span><span class="caret">▾</span></div>
+        </div>
+        <div class="mono" style="font-size:10px; color:var(--ink-faint); margin-top:8px; letter-spacing:1px;">src ≠ tgt ✓</div>
+      </div>
+
+      <div style="flex:0 0 auto; height:12px"></div>
+
+      <!-- rejoin banner (left-side compact; for rejoin state) -->
+      <div id="rejoinBannerA2" class="rejoin-block" style="display:none;">
+        <div class="title">Server busy</div>
+        <div class="hint" style="margin-top:4px;">Rejoin <b class="mono">7ca09ebb</b> to watch it finish. Your file is queued locally.</div>
+      </div>
+
+      <!-- command bar -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="btn primary" id="submitA2" style="width:100%; font-size:16px;">Start translation</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-faint); letter-spacing:1px;">
+          <span id="helpA2">⌘ + ↵</span>
+          <a href="#" id="deleteLinkA2" onclick="return false;" style="color:var(--ink-faint); text-decoration:none; display:none;">✗ delete job</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: progress / result console (same as A) -->
+    <div class="col-panel accent" id="rightA2">
+      <div class="label">
+        <span id="rightLabelA2">PROGRESS · ONE WINDOW</span>
+        <span class="badge on" id="progressBadgeA2">LIVE</span>
+      </div>
+
+      <div class="stages" id="stagesA2">
+        <div class="stage done" id="stageS1_A2"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+        <div class="stage done" id="stageS2_A2"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+        <div class="stage active" id="stageS3_A2"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">32s</div></div>
+        <div class="stage pending" id="stageS4_A2"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+        <div class="stage pending" id="stageS5_A2"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div id="elapsedRowA2" style="display:flex; gap:14px; align-items:center; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--ink-soft);">
+        <span>⏱ elapsed <b>00:42</b></span>
+        <span id="etaWrapA2">· est. remaining <b>~1:10</b> <span style="color:var(--ink-faint)">(heuristic)</span></span>
+        <div class="meter stripe" id="meterA2" style="flex:1; min-width: 120px;"><span style="width:40%"></span></div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div id="rightBodyA2" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        <!-- log (running) -->
+        <div id="logWrapA2" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+          <div class="tile-head">
+            <h4>Live log</h4>
+            <span class="tag">SSE · 3 severities · scroll pauses autofollow</span>
+          </div>
+          <div class="log" id="logA2" style="flex:1; min-height:0;">
+            <div><span class="t">[22:30:12]</span> <span class="i">INFO</span> Loading video: …/7ca09ebb/1-origin.mp4</div>
+            <div><span class="t">[22:30:13]</span> <span class="i">INFO</span> Loaded 178 frames (30.0 fps, 1080×1920)</div>
+            <div><span class="t">[22:30:13]</span> <span class="i">INFO</span> === Stage 1: Detection &amp; Selection ===</div>
+            <div><span class="t">[22:30:17]</span> <span class="i">INFO</span> S1: done · 4 regions · 4.2s</div>
+            <div><span class="t">[22:30:17]</span> <span class="i">INFO</span> === Stage 2: Frontalize ===</div>
+            <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> S2: done · 4 crops · 6.1s</div>
+            <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> === Stage 3: Edit (AI model) ===</div>
+            <div><span class="t">[22:30:41]</span> <span class="w">WARN</span> S3: model warmup exceeded 15s · proceeding</div>
+            <div><span class="t">[22:30:54]</span> <span class="i">INFO</span> S3: region 2/4 rewritten<span class="cur"></span></div>
+            <div class="dim"><span class="t">··· silence is OK. Stage 3 can pause for minutes ···</span></div>
+          </div>
+          <div class="scroll-hint">↕ scroll · autoscroll pauses on interaction</div>
+        </div>
+
+        <!-- result -->
+        <div id="resultWrapA2" style="display:none; flex:1; flex-direction:column; min-height:0; gap:10px;">
+          <div class="video-ph" style="flex:1;"><span class="cap">[translated.mp4 · en→es]</span></div>
+          <div style="display:flex; gap:10px; flex-wrap: wrap;">
+            <button class="btn accent">⬇ Download</button>
+            <span class="hint" style="font-size:14px; color:var(--ink-faint); align-self:center;">← submit another / delete in left column</span>
+          </div>
+        </div>
+
+        <!-- failure -->
+        <div id="failWrapA2" style="display:none; flex:1; flex-direction:column; min-height:0; gap:10px;">
+          <div class="box" style="border-color:var(--err); background: var(--err-soft); flex:1; overflow:auto;">
+            <div class="label"><span style="color:var(--err)">PIPELINE CRASHED</span></div>
+            <h3 class="title" style="color:var(--err)">CUDA out of memory at Stage 3</h3>
+            <div class="hint">Tried to allocate 2.3 GiB on a busy GPU.</div>
+            <details style="margin-top:10px;">
+              <summary class="mono" style="font-size:11px; cursor:pointer; color:var(--ink-soft)">show traceback</summary>
+              <pre class="log" style="margin-top:6px; max-height:140px;">Traceback (most recent call last):
+  File "pipeline/edit.py", line 88, in rewrite
+    out = model.generate(…)
+torch.cuda.OutOfMemoryError: tried to allocate 2.3 GiB</pre>
+            </details>
+          </div>
+          <div class="hint" style="font-size:14px; color:var(--ink-faint);">← submit another / delete in left column</div>
+        </div>
+
+        <!-- idle -->
+        <div id="idleWrapA2" style="display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:14px;">
+          <div style="width:64px; height:64px; border:2px dashed var(--ink-ghost); display:flex; align-items:center; justify-content:center; font-size:28px; color:var(--ink-ghost);">◻</div>
+          <div class="mono" style="font-size:11px; color:var(--ink-faint); letter-spacing:2px;">WAITING FOR A JOB</div>
+          <div class="hint" style="max-width:42ch; color:var(--ink-soft);">Pick a file and hit <b>Start translation</b> on the left. Stages, log, and the result will all appear in this window.</div>
+        </div>
+
+        <!-- upload panel (uploading state) -->
+        <div id="uploadWrapA2" style="display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:18px;">
+          <div class="mono" style="font-size:11px; color:var(--ink-faint); letter-spacing:2px;">UPLOADING TO SERVER</div>
+          <div style="width:80%; max-width:440px;">
+            <div style="display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:12px; margin-bottom:8px;">
+              <span><b>64%</b></span>
+              <span style="color:var(--ink-soft);">91.2 / 142.6 MB · 8.4 MB/s</span>
+            </div>
+            <div class="meter stripe" style="width:100%; height:10px;"><span style="width:64%"></span></div>
+            <div class="mono" style="font-size:10px; color:var(--ink-faint); margin-top:10px; letter-spacing:1px;">~ 6s remaining</div>
+          </div>
+          <div class="hint" style="max-width:42ch; color:var(--ink-soft);">Pipeline will start once the server finishes receiving the file. Stages, log, and ETA appear then.</div>
+        </div>
+
+        <!-- rejoin decision panel (rejoin state: full-content, not banner) -->
+        <div id="rejoinPanelA2" style="display:none; flex:1; flex-direction:column; justify-content:flex-start; gap:16px;">
+          <div class="rejoin-block" style="padding:20px;">
+            <div class="label" style="color:var(--err); margin-bottom:8px;">
+              <span style="color:var(--err)">● ANOTHER JOB IS RUNNING</span>
+            </div>
+            <h3 class="title" style="margin-bottom:6px;">Server is busy</h3>
+            <div class="hint" style="margin-bottom:16px;">Only one job at a time on this server. Your file hasn't been uploaded — it's waiting locally.</div>
+            <dl class="kv" style="grid-template-columns:auto 1fr; row-gap:6px; margin-bottom:18px;">
+              <dt>running job</dt><dd class="mono">7ca09ebb</dd>
+              <dt>stage</dt><dd>S3 · Edit <span style="color:var(--ink-faint)">(of 5)</span></dd>
+              <dt>started</dt><dd>22:30:12 <span style="color:var(--ink-faint)">· 00:42 ago</span></dd>
+              <dt>est. remaining</dt><dd class="etaLine">~1:10 <span style="color:var(--ink-faint)">(heuristic)</span></dd>
+            </dl>
+            <button class="btn accent" id="rejoinBtnA2" style="width:100%; font-size:15px;">Rejoin running job →</button>
+            <div class="hint" style="margin-top:10px; font-size:13px; color:var(--ink-faint); text-align:center;">or wait for the server to free up · your file will stay queued</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; display:flex; gap: 24px; flex-wrap:wrap;">
+    <div class="hint">✎ video <i>is</i> the file summary — play, scrub, point at a sign while Stage 3 runs.</div>
+    <div class="hint">✎ language pair reads as <b>one</b> decision, not two stacked form fields.</div>
+    <div class="hint">✎ drop zone only loud when empty (tweak: <i>file state</i>).</div>
+    <div class="hint">✎ delete-job link lives under the submit button, not in the progress pane.</div>
+  </div>
+</main>
+
+<!-- ============ SHEET B · STACKED FOCUS ============ -->
+<main class="sheet" data-sheet="B">
+  <div class="sheet-head">
+    <div>
+      <h2>B · Stacked Focus</h2>
+      <div class="notes">Top-to-bottom reading order. Form collapses to a summary bar once a job starts. The progress window is always the widest, centered object. Result appears below it.</div>
+    </div>
+    <div class="meta">1440 × auto · vertical rhythm</div>
+  </div>
+
+  <div class="grid-stack">
+
+    <!-- identity strip -->
+    <div style="display:flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed var(--ink); padding-bottom:14px; gap: 20px;">
+      <div style="min-width:0;">
+        <h3 class="title" style="line-height:1.1;">Scene Text Translator</h3>
+        <div class="hint" style="margin-top:2px;">Replace on-screen text across languages.</div>
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--ink-faint); white-space:nowrap;">one job at a time · desktop only</div>
+    </div>
+
+    <!-- form OR summary bar -->
+    <div id="formB" class="box">
+      <div class="label">SETUP</div>
+      <div style="display: grid; grid-template-columns: 1fr 220px 220px 160px; gap: 14px; align-items: end;">
+        <div>
+          <div class="field-label">video file</div>
+          <div class="drop" style="padding: 14px;">
+            <div class="big">⬆ Drop video here</div>
+            <span class="tiny">MP4 / MOV / WebM / AVI · ≤ 200 MB</span>
+          </div>
+        </div>
+        <div>
+          <div class="field-label">source</div>
+          <div class="input"><span>English</span><span class="caret">▾</span></div>
+        </div>
+        <div>
+          <div class="field-label">target</div>
+          <div class="input"><span>Spanish</span><span class="caret">▾</span></div>
+        </div>
+        <div>
+          <button class="btn primary" style="width:100%">Start translation</button>
+          <div class="mono" style="font-size:10px; margin-top:6px; color:var(--ink-faint);">⌘+↵ to submit</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="summaryB" class="summary-bar" style="display:none;">
+      <div class="grp">
+        <span>JOB</span>
+        <b class="mono">7ca09ebb</b>
+        <span>·</span>
+        <span>interview_cut_v3.mp4 <span style="color:var(--ink-faint)">142.6 MB</span></span>
+        <span>·</span>
+        <span><b>en</b> → <b>es</b></span>
+      </div>
+      <div class="grp">
+        <span style="color:var(--ink-faint)">collapsed while running</span>
+      </div>
+    </div>
+
+    <!-- rejoin inline (hidden by default) -->
+    <div id="rejoinB" class="rejoin-block" style="display:none;">
+      <div class="title">Another job is already running</div>
+      <div class="hint" style="margin-top:6px;">job <b class="mono">7ca09ebb</b> is at stage 3 of 5. Your submit was refused by the server.</div>
+      <div style="height:10px"></div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn accent">Rejoin that job →</button>
+        <button class="btn ghost">Wait and retry</button>
+      </div>
+    </div>
+
+    <!-- progress window (the one focus) -->
+    <div class="box accent" id="progressB">
+      <div class="label">
+        PROGRESS · ONE WINDOW
+        <span class="badge on">LIVE · STAGE 3/5</span>
+      </div>
+      <div class="stages">
+        <div class="stage done"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+        <div class="stage done"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+        <div class="stage active"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">32s</div></div>
+        <div class="stage pending"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+        <div class="stage pending"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+      </div>
+      <div style="height:12px"></div>
+      <div class="tile-head">
+        <h4>Live log for <span class="mono" style="font-size:13px; color:var(--accent)">S3 · Edit</span></h4>
+        <span class="tag">auto-follow · click to pin</span>
+      </div>
+      <div class="log" style="min-height: 260px; max-height: 320px;">
+        <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> === Stage 3: Edit (AI model) ===</div>
+        <div><span class="t">[22:30:24]</span> <span class="i">INFO</span> S3: loading checkpoint edit-v4.2</div>
+        <div><span class="t">[22:30:31]</span> <span class="i">INFO</span> S3: checkpoint ready (7.1s)</div>
+        <div><span class="t">[22:30:41]</span> <span class="w">WARN</span> S3: model warmup exceeded 15s · proceeding</div>
+        <div><span class="t">[22:30:44]</span> <span class="i">INFO</span> S3: region 1/4 rewritten</div>
+        <div><span class="t">[22:30:54]</span> <span class="i">INFO</span> S3: region 2/4 rewritten<span class="cur"></span></div>
+      </div>
+      <div class="scroll-hint">showing live · elapsed <b class="mono">00:42</b> · est ~1:10 remain</div>
+    </div>
+
+    <!-- result block -->
+    <div id="resultB" class="box" style="display:none;">
+      <div class="label">RESULT <span class="badge ok">READY</span></div>
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 18px;">
+        <div class="video-ph"><span class="cap">[translated.mp4]</span></div>
+        <div class="grid-stack">
+          <dl class="kv">
+            <dt>job</dt><dd>7ca09ebb</dd>
+            <dt>took</dt><dd>2m 08s</dd>
+            <dt>size out</dt><dd>138.4 MB</dd>
+            <dt>regions</dt><dd>4 rewritten</dd>
+          </dl>
+          <button class="btn accent">⬇ Download MP4</button>
+          <button class="btn">Start new job</button>
+          <button class="btn danger ghost">Delete job</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="failB" class="box" style="display:none; border-color:var(--err); background:var(--err-soft);">
+      <div class="label"><span style="color:var(--err)">FAILED · STAGE 3</span></div>
+      <h3 class="title">CUDA out of memory</h3>
+      <div class="hint">Model ran out of GPU memory while rewriting region 3 of 4.</div>
+      <details style="margin-top:8px;"><summary class="mono" style="cursor:pointer; font-size:11px;">show traceback</summary>
+        <pre class="log" style="margin-top:6px; max-height:140px;">torch.cuda.OutOfMemoryError: ...</pre>
+      </details>
+      <div style="height:10px"></div>
+      <div style="display:flex; gap:10px;"><button class="btn">Start new job</button><button class="btn danger ghost">Delete job</button></div>
+    </div>
+
+    <div class="hint">✎ this layout reads like a recipe — inputs at top, cook in the middle, plate at the bottom.</div>
+  </div>
+</main>
+
+<!-- ============ SHEET C · COCKPIT GRID ============ -->
+<main class="sheet" data-sheet="C">
+  <div class="sheet-head">
+    <div>
+      <h2>C · Cockpit Grid</h2>
+      <div class="notes">Every conceptual component gets its own tile. No hiding. State changes only dim/light tiles — layout stays fixed. Best for audience who want to see “all the machinery” at once.</div>
+    </div>
+    <div class="meta">1440 × auto · 12-col grid</div>
+  </div>
+
+  <div class="state-banner running" id="banner-C">
+    <div class="left">
+      <span class="dot"></span>
+      <b class="mono" id="stateC">RUNNING · STAGE 3 / 5</b>
+      <span class="jobid">job 7ca09ebb · elapsed 00:42 · est ~1:10</span>
+    </div>
+    <div class="mono" style="font-size:11px; color:var(--ink-faint);">one-job-at-a-time server</div>
+  </div>
+
+  <div class="grid-cockpit">
+
+    <!-- identity -->
+    <div class="box" style="grid-column: span 3;">
+      <div class="label">IDENTITY</div>
+      <h3 class="title">Scene Text Translator</h3>
+      <div class="mono" style="font-size:10px; color:var(--ink-faint); margin-top:4px;">v0.1 · research demo</div>
+    </div>
+
+    <!-- file input -->
+    <div class="box" id="file-C" style="grid-column: span 4;">
+      <div class="label">1 · FILE <span class="badge on">SELECTED</span></div>
+      <div class="drop" style="padding:14px;">
+        <div class="big">⬆ Drop video</div>
+        <span class="tiny">picker or drop · MP4/MOV/WebM/AVI · ≤200MB</span>
+      </div>
+      <div style="height:8px"></div>
+      <dl class="kv"><dt>file</dt><dd>interview_cut_v3.mp4 · 142.6 MB</dd></dl>
+    </div>
+
+    <!-- languages -->
+    <div class="box" id="langs-C" style="grid-column: span 3;">
+      <div class="label">2 · LANGUAGES</div>
+      <div class="field-label">source</div>
+      <div class="input"><span>English</span><span class="caret">▾</span></div>
+      <div style="height:8px"></div>
+      <div class="field-label">target</div>
+      <div class="input"><span>Spanish</span><span class="caret">▾</span></div>
+      <div class="hint" style="margin-top:6px; font-size:15px;">src ≠ tgt ✓</div>
+    </div>
+
+    <!-- submit / action -->
+    <div class="box" id="submit-C" style="grid-column: span 2;">
+      <div class="label">3 · ACT</div>
+      <button class="btn primary" style="width:100%; padding: 18px 10px; font-size: 16px;">Start</button>
+      <div class="mono" style="font-size:10px; color:var(--ink-faint); margin-top:8px; text-align:center;">⌘ + ↵</div>
+    </div>
+
+    <!-- BIG progress window (cockpit's centerpiece, per your constraint) -->
+    <div class="box accent" id="prog-C" style="grid-column: span 8;">
+      <div class="label">
+        4 · PROGRESS · ONE WINDOW ONLY
+        <span class="badge on">LIVE</span>
+      </div>
+      <div class="stages">
+        <div class="stage done"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+        <div class="stage done"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+        <div class="stage active"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">32s</div></div>
+        <div class="stage pending"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+        <div class="stage pending"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+      </div>
+      <div style="height:10px"></div>
+      <div class="log" style="max-height: 220px;">
+        <div><span class="t">[22:30:23]</span> <span class="i">INFO</span> === Stage 3: Edit (AI model) ===</div>
+        <div><span class="t">[22:30:31]</span> <span class="i">INFO</span> S3: checkpoint ready (7.1s)</div>
+        <div><span class="t">[22:30:41]</span> <span class="w">WARN</span> S3: warmup &gt; 15s · proceeding</div>
+        <div><span class="t">[22:30:44]</span> <span class="i">INFO</span> S3: region 1/4 rewritten</div>
+        <div><span class="t">[22:30:54]</span> <span class="i">INFO</span> S3: region 2/4 rewritten<span class="cur"></span></div>
+      </div>
+    </div>
+
+    <!-- result tile -->
+    <div class="box dim" id="result-C" style="grid-column: span 4;">
+      <div class="label">5 · RESULT <span class="badge">WAITING</span></div>
+      <div class="video-ph" style="aspect-ratio: 16/10;"><span class="cap">[preview appears here]</span></div>
+      <div style="height:8px"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn disabled" style="flex:1;">⬇ Download</button>
+        <button class="btn disabled" style="flex:1;">New job</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">lights up when S5 finishes.</div>
+    </div>
+
+    <!-- terminal actions / delete -->
+    <div class="box dim" id="terminal-C" style="grid-column: span 6;">
+      <div class="label">TERMINAL ACTIONS</div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn disabled">Start new job</button>
+        <button class="btn danger disabled">Delete job (removes server files)</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">disabled while running. delete is one-click — add a confirm?</div>
+    </div>
+
+    <!-- error / warn tile -->
+    <div class="box dim" id="errors-C" style="grid-column: span 6;">
+      <div class="label">WARNINGS &amp; ERRORS</div>
+      <div class="hint" style="font-size:15px;">quiet for now. oversize files, lang-list failures, concurrency blocks, pipeline crashes surface here as a stack of dismissible notices.</div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:20px;" class="hint">✎ the &quot;cockpit&quot; reads technical — everything visible all the time — but you said the progress must be in ONE window, so stages + log share tile #4.</div>
+</main>
+
+<!-- ============ SHEET D · CONSOLE-FIRST ============ -->
+<main class="sheet" data-sheet="D">
+  <div class="sheet-head">
+    <div>
+      <h2>D · Console-First</h2>
+      <div class="notes">The live log is the hero: a big dark terminal-feeling panel with the stage tracker fused into its header. Form and preview dock as smaller satellites. Strongest fit for a technical/research audience.</div>
+    </div>
+    <div class="meta">1440 × auto · 3-column console</div>
+  </div>
+
+  <div class="grid-console">
+
+    <!-- LEFT sidebar: setup + identity + status -->
+    <div class="grid-stack">
+      <div class="box">
+        <div class="mono" style="font-size:10px; letter-spacing:2px; color:var(--ink-faint);">SCENE TEXT TRANSLATOR</div>
+        <h3 class="title" style="margin-top:4px;">Console</h3>
+        <div class="hint" style="font-size:15px;">live pipeline · one job</div>
+      </div>
+
+      <div class="box">
+        <div class="label">JOB</div>
+        <dl class="kv">
+          <dt>id</dt><dd class="mono">7ca09ebb</dd>
+          <dt>state</dt><dd class="mono" id="stateD">RUNNING</dd>
+          <dt>stage</dt><dd class="mono">3 / 5 · Edit</dd>
+          <dt>elapsed</dt><dd class="mono">00:42</dd>
+          <dt>est left</dt><dd class="mono">~1:10</dd>
+        </dl>
+      </div>
+
+      <div class="box" id="formD">
+        <div class="label">NEW JOB</div>
+        <div class="drop" style="padding: 16px;">
+          <div class="big">⬆ drop video</div>
+          <span class="tiny">≤200 MB</span>
+        </div>
+        <div style="height:10px"></div>
+        <div class="field-label">source</div>
+        <div class="input"><span>English</span><span class="caret">▾</span></div>
+        <div style="height:8px"></div>
+        <div class="field-label">target</div>
+        <div class="input"><span>Spanish</span><span class="caret">▾</span></div>
+        <div style="height:10px"></div>
+        <button class="btn primary" style="width:100%">Start translation</button>
+        <div class="hint" style="margin-top:6px; font-size:14px; color:var(--ink-faint);">disabled while console is running — see right</div>
+      </div>
+    </div>
+
+    <!-- CENTER: the console -->
+    <div class="box" id="consoleD" style="background:var(--ink); color:var(--paper); border-color:var(--ink); padding:0;">
+      <!-- stage strip in header -->
+      <div style="padding: 10px 14px; border-bottom: 1px solid #2e353b; display:flex; justify-content: space-between; align-items:center;">
+        <div class="mono" style="font-size:11px; color:#8aa7b3;">// pipeline</div>
+        <div class="mono" style="font-size:11px; color:var(--accent);">● LIVE · S3 / 5 · elapsed 00:42</div>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:0; border-bottom: 1px solid #2e353b;">
+        <div style="padding:10px; border-right:1px solid #2e353b; text-align:center;"><div class="mono" style="font-size:10px; color:#8aa7b3;">S1 · DETECT</div><div class="mono" style="font-size:11px; color:#cfe7ef; margin-top:2px;">✓ 4.2s</div></div>
+        <div style="padding:10px; border-right:1px solid #2e353b; text-align:center;"><div class="mono" style="font-size:10px; color:#8aa7b3;">S2 · FRONTALIZE</div><div class="mono" style="font-size:11px; color:#cfe7ef; margin-top:2px;">✓ 6.1s</div></div>
+        <div style="padding:10px; border-right:1px solid #2e353b; text-align:center; background: oklch(0.35 0.08 220);">
+          <div class="mono" style="font-size:10px; color:var(--accent); letter-spacing:1.5px;">▶ S3 · EDIT</div>
+          <div class="mono" style="font-size:11px; color:var(--accent); margin-top:2px;">● 32s</div>
+        </div>
+        <div style="padding:10px; border-right:1px solid #2e353b; text-align:center; opacity:.45;"><div class="mono" style="font-size:10px; color:#8aa7b3;">S4 · PROPAGATE</div><div class="mono" style="font-size:11px; color:#8aa7b3; margin-top:2px;">— pending</div></div>
+        <div style="padding:10px; text-align:center; opacity:.45;"><div class="mono" style="font-size:10px; color:#8aa7b3;">S5 · REVERT</div><div class="mono" style="font-size:11px; color:#8aa7b3; margin-top:2px;">— pending</div></div>
+      </div>
+
+      <!-- log body -->
+      <div class="log" style="border: 0; max-height: 440px; min-height: 360px; font-size: 12px; padding: 14px 18px;">
+        <div><span class="t">[22:30:12]</span> <span class="i">INFO </span> Loading video: /storage/…/7ca09ebb/1-origin.mp4</div>
+        <div><span class="t">[22:30:13]</span> <span class="i">INFO </span> Loaded 178 frames (30.0 fps, 1080×1920)</div>
+        <div><span class="t">[22:30:13]</span> <span class="i">INFO </span> === Stage 1: Detection &amp; Selection ===</div>
+        <div><span class="t">[22:30:13]</span> <span class="i">INFO </span> S1: Starting detection on 178 frames</div>
+        <div><span class="t">[22:30:17]</span> <span class="i">INFO </span> S1: done · 4 regions · 4.2s</div>
+        <div><span class="t">[22:30:17]</span> <span class="i">INFO </span> === Stage 2: Frontalize ===</div>
+        <div><span class="t">[22:30:23]</span> <span class="i">INFO </span> S2: done · 4 crops · 6.1s</div>
+        <div><span class="t">[22:30:23]</span> <span class="i">INFO </span> === Stage 3: Edit (AI model) ===</div>
+        <div><span class="t">[22:30:24]</span> <span class="i">INFO </span> S3: loading checkpoint edit-v4.2</div>
+        <div><span class="t">[22:30:31]</span> <span class="i">INFO </span> S3: checkpoint ready (7.1s)</div>
+        <div><span class="t">[22:30:41]</span> <span class="w">WARN </span> S3: model warmup exceeded 15s · proceeding anyway</div>
+        <div><span class="t">[22:30:44]</span> <span class="i">INFO </span> S3: region 1/4 rewritten</div>
+        <div><span class="t">[22:30:54]</span> <span class="i">INFO </span> S3: region 2/4 rewritten<span class="cur"></span></div>
+        <div class="dim"><span class="t">··· silence is OK — stage 3 can sit quiet for minutes ···</span></div>
+      </div>
+
+      <!-- footer strip -->
+      <div style="padding: 8px 14px; border-top: 1px solid #2e353b; display:flex; justify-content: space-between; align-items:center;">
+        <span class="mono" style="font-size:10px; color:#8aa7b3;">sse · autoscroll ON · 3 severities</span>
+        <span class="mono" style="font-size:10px; color:#8aa7b3;">log lines: 12 · lost on reconnect (silent)</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: result dock -->
+    <div class="grid-stack">
+      <div class="box" id="resultD">
+        <div class="label">RESULT DOCK <span class="badge" id="resultBadgeD">WAITING</span></div>
+        <div class="video-ph" style="aspect-ratio: 9/16; max-height: 320px; margin: 0 auto;"><span class="cap">[preview]</span></div>
+        <div style="height:8px"></div>
+        <button class="btn accent" style="width:100%;">⬇ Download</button>
+        <div style="height:6px"></div>
+        <button class="btn" style="width:100%;">Start new job</button>
+        <div style="height:6px"></div>
+        <button class="btn danger ghost" style="width:100%;">Delete job</button>
+        <div class="hint" style="margin-top:6px; font-size:14px; color:var(--ink-faint);">actions unlock when pipeline ends.</div>
+      </div>
+
+      <div class="box dashed">
+        <div class="label">ACCESSIBILITY NOTES</div>
+        <ul style="margin:0; padding-left:18px; font-family:'Kalam'; font-size:15px; line-height:1.35;">
+          <li>Stage change announced via aria-live=polite</li>
+          <li>Log panel: batched announcements, not per-line</li>
+          <li>Stage state uses ✓ / ● / — in addition to color</li>
+          <li>Respects prefers-reduced-motion</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:20px;" class="hint">✎ stage strip is <i>fused</i> into the console header — satisfies the "one window for progress + log" rule even more tightly than A/B/C.</div>
+</main>
+
+<!-- ========= TWEAKS ========= -->
+<button id="toggleTweaks">✎ Tweaks</button>
+<aside id="tweaks" class="on">
+  <header>
+    <span>TWEAKS</span>
+    <span class="x" id="tweaksClose">×</span>
+  </header>
+  <div class="body">
+    <div class="row">
+      <div class="name">Pipeline state</div>
+      <div class="seg cols-3" data-tweak="state">
+        <button data-v="idle">idle</button>
+        <button data-v="uploading">upload</button>
+        <button data-v="running" class="on">running</button>
+        <button data-v="succeeded">done</button>
+        <button data-v="failed">failed</button>
+        <button data-v="rejoin">rejoin</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="name">Log prominence</div>
+      <div class="seg cols-2" data-tweak="log">
+        <button data-v="first" class="on">first-class</button>
+        <button data-v="tucked">tucked</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="name">Show ETA heuristic</div>
+      <div class="seg cols-2" data-tweak="eta">
+        <button data-v="on" class="on">on</button>
+        <button data-v="off">off · elapsed only</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ========= TWEAKS ========= -->
+
+<script>
+(() => {
+  // ---------- TABS ----------
+  const tabs = document.querySelectorAll('#tabs .tab');
+  const sheets = document.querySelectorAll('main.sheet');
+  function showSheet(id) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.sheet === id));
+    sheets.forEach(s => s.classList.toggle('active', s.dataset.sheet === id));
+    localStorage.setItem('wf.sheet', id);
+    // scroll top (avoid scrollIntoView)
+    window.scrollTo({top: 0, behavior: 'instant'});
+  }
+  tabs.forEach(t => t.addEventListener('click', () => showSheet(t.dataset.sheet)));
+  const savedSheet = localStorage.getItem('wf.sheet');
+  if (savedSheet) showSheet(savedSheet);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const map = {'1':'A','2':'A2','3':'B','4':'C','5':'D'};
+    if (map[e.key]) showSheet(map[e.key]);
+  });
+
+  // ---------- TWEAKS ----------
+  const state = {
+    state: localStorage.getItem('wf.state') || 'running',
+    log: localStorage.getItem('wf.log') || 'first',
+    rejoin: localStorage.getItem('wf.rejoin') || 'inline',
+    eta: localStorage.getItem('wf.eta') || 'on',
+  };
+  function saveState() {
+    Object.entries(state).forEach(([k,v]) => localStorage.setItem('wf.' + k, v));
+  }
+  document.querySelectorAll('[data-tweak]').forEach(seg => {
+    const key = seg.dataset.tweak;
+    // init active
+    seg.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('on', b.dataset.v === state[key]);
+      b.addEventListener('click', () => {
+        seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        state[key] = b.dataset.v;
+        saveState();
+        applyState();
+      });
+    });
+  });
+
+  document.getElementById('toggleTweaks').addEventListener('click', () => {
+    document.getElementById('tweaks').classList.toggle('on');
+  });
+  document.getElementById('tweaksClose').addEventListener('click', () => {
+    document.getElementById('tweaks').classList.remove('on');
+  });
+
+  // ---------- APPLY STATE ----------
+  function applyState() {
+    const s = state.state;
+    document.getElementById('stateLabel').textContent = s;
+
+    // ETA heuristic toggle (applies to both sheets + rejoin panels)
+    const etaOn = state.eta === 'on';
+    document.querySelectorAll('#etaWrapA, #etaWrapA2').forEach(el => {
+      el.style.display = etaOn ? 'inline' : 'none';
+    });
+    document.querySelectorAll('.etaLine').forEach(el => {
+      el.style.display = etaOn ? '' : 'none';
+    });
+
+    // --- Sheet A (refined, equal-height split) ---
+    const bannerA = document.getElementById('banner-A');
+    bannerA.classList.remove('running','done','failed');
+    const stateA = document.getElementById('stateA');
+    const rightLabelA = document.getElementById('rightLabelA');
+    const formBadgeA = document.getElementById('formBadgeA');
+    const submitA = document.getElementById('submitA');
+    const progressBadgeA = document.getElementById('progressBadgeA');
+    const helpA = document.getElementById('helpA');
+    const rejoinBannerA = document.getElementById('rejoinBannerA');
+    const logWrapA = document.getElementById('logWrapA');
+    const resultWrapA = document.getElementById('resultWrapA');
+    const failWrapA = document.getElementById('failWrapA');
+    const idleWrapA = document.getElementById('idleWrapA');
+    const uploadWrapA = document.getElementById('uploadWrapA');
+    const rejoinPanelA = document.getElementById('rejoinPanelA');
+    const elapsedRowA = document.getElementById('elapsedRowA');
+    const meterA = document.getElementById('meterA');
+    const estA = document.getElementById('estA');
+    const etaNote = document.getElementById('etaNote');
+    const stageS1 = document.getElementById('stageS1');
+    const stageS2 = document.getElementById('stageS2');
+    const stageS3 = document.getElementById('stageS3');
+    const stageS4 = document.getElementById('stageS4');
+    const stageS5 = document.getElementById('stageS5');
+
+    // reset (base)
+    logWrapA.style.display = 'none';
+    resultWrapA.style.display = 'none';
+    failWrapA.style.display = 'none';
+    idleWrapA.style.display = 'none';
+    uploadWrapA.style.display = 'none';
+    rejoinPanelA.style.display = 'none';
+    rejoinBannerA.style.display = 'none';
+    document.getElementById('stagesA').style.display = 'grid';
+    meterA.style.display = 'block';
+    elapsedRowA.style.display = 'flex';
+    submitA.classList.remove('disabled','accent');
+    submitA.textContent = 'Start translation';
+    submitA.classList.add('primary');
+    helpA.style.display = 'block';
+    formBadgeA.className = 'badge on';
+    formBadgeA.textContent = 'READY';
+    rightLabelA.textContent = 'PROGRESS · ONE WINDOW';
+    progressBadgeA.className = 'badge on';
+    progressBadgeA.textContent = 'LIVE';
+    // reset stages to "running" snapshot
+    stageS1.className = 'stage done';
+    stageS1.querySelector('.dur').textContent = '4.2s';
+    stageS2.className = 'stage done';
+    stageS2.querySelector('.dur').textContent = '6.1s';
+    stageS3.className = 'stage active';
+    stageS3.querySelector('.dur').textContent = '32s';
+    stageS4.className = 'stage pending';
+    stageS4.querySelector('.dur').textContent = '—';
+    stageS5.className = 'stage pending';
+    stageS5.querySelector('.dur').textContent = '—';
+
+    switch(s) {
+      case 'idle':
+        stateA.textContent = 'IDLE';
+        idleWrapA.style.display = 'flex';
+        rightLabelA.textContent = 'READY WHEN YOU ARE';
+        progressBadgeA.className = 'badge';
+        progressBadgeA.textContent = 'IDLE';
+        // idle: hide stages bar and elapsed row entirely
+        document.getElementById('stagesA').style.display = 'none';
+        meterA.style.display = 'none';
+        elapsedRowA.style.display = 'none';
+        break;
+      case 'uploading':
+        stateA.textContent = 'UPLOADING · 64%';
+        bannerA.classList.add('running');
+        uploadWrapA.style.display = 'flex';
+        rightLabelA.textContent = 'UPLOADING';
+        progressBadgeA.textContent = 'UPLOADING';
+        submitA.classList.add('disabled');
+        submitA.textContent = 'Uploading… 64%';
+        formBadgeA.textContent = 'BUSY';
+        formBadgeA.className = 'badge warn';
+        // no pipeline yet — hide stages, elapsed row, meter
+        document.getElementById('stagesA').style.display = 'none';
+        meterA.style.display = 'none';
+        elapsedRowA.style.display = 'none';
+        break;
+      case 'running':
+        stateA.textContent = 'RUNNING';
+        bannerA.classList.add('running');
+        logWrapA.style.display = 'flex';
+        progressBadgeA.textContent = 'LIVE';
+        submitA.classList.add('disabled');
+        submitA.textContent = 'Job running…';
+        formBadgeA.textContent = 'LOCKED';
+        formBadgeA.className = 'badge warn';
+        break;
+      case 'succeeded':
+        stateA.textContent = 'DONE';
+        bannerA.classList.add('done');
+        resultWrapA.style.display = 'flex';
+        rightLabelA.textContent = 'RESULT · SAME WINDOW';
+        progressBadgeA.className = 'badge ok';
+        progressBadgeA.textContent = 'READY';
+        formBadgeA.textContent = 'LOCKED';
+        submitA.textContent = 'Submit another';
+        submitA.classList.remove('primary','disabled');
+        // all stages done
+        stageS3.className = 'stage done';
+        stageS3.querySelector('.dur').textContent = '1:32';
+        stageS4.className = 'stage done';
+        stageS4.querySelector('.dur').textContent = '12s';
+        stageS5.className = 'stage done';
+        stageS5.querySelector('.dur').textContent = '3.1s';
+        estA.textContent = '—';
+        etaNote.textContent = '(total 2:08)';
+        meterA.querySelector('span').style.width = '100%';
+        break;
+      case 'failed':
+        stateA.textContent = 'FAILED';
+        bannerA.classList.add('failed');
+        failWrapA.style.display = 'flex';
+        rightLabelA.textContent = 'FAILURE · SAME WINDOW';
+        progressBadgeA.className = 'badge err';
+        progressBadgeA.textContent = 'ERR';
+        formBadgeA.textContent = 'LOCKED';
+        submitA.textContent = 'Submit another';
+        submitA.classList.remove('primary','disabled');
+        // S3 marked as failed visually (add err class)
+        stageS3.className = 'stage fail';
+        stageS3.querySelector('.dur').textContent = '8s ✗';
+        break;
+      case 'rejoin':
+        stateA.textContent = 'REJOIN-BLOCKED';
+        bannerA.classList.add('running');
+        // right column becomes a pure decision surface — no live telemetry until user opts in
+        rejoinPanelA.style.display = 'flex';
+        rightLabelA.textContent = 'ACTION REQUIRED';
+        progressBadgeA.className = 'badge err';
+        progressBadgeA.textContent = 'BLOCKED';
+        // hide stages/log/elapsed — we haven't joined yet
+        document.getElementById('stagesA').style.display = 'none';
+        meterA.style.display = 'none';
+        elapsedRowA.style.display = 'none';
+        // left column: submit is disabled and says 'waiting'
+        submitA.textContent = 'Waiting for server …';
+        submitA.classList.add('disabled');
+        submitA.classList.remove('accent');
+        formBadgeA.textContent = 'BLOCKED';
+        formBadgeA.className = 'badge err';
+        helpA.style.display = 'none';
+        break;
+    }
+
+    // --- Sheet A2 (job-ticket left) ---
+    (function(){
+      const banner = document.getElementById('banner-A2');
+      banner.classList.remove('running','done','failed');
+      const stateLbl = document.getElementById('stateA2');
+      const rightLbl = document.getElementById('rightLabelA2');
+      const formBadge = document.getElementById('formBadgeA2');
+      const submit = document.getElementById('submitA2');
+      const progressBadge = document.getElementById('progressBadgeA2');
+      const help = document.getElementById('helpA2');
+      const delLink = document.getElementById('deleteLinkA2');
+      const rejoinBanner = document.getElementById('rejoinBannerA2');
+      const logWrap = document.getElementById('logWrapA2');
+      const resultWrap = document.getElementById('resultWrapA2');
+      const failWrap = document.getElementById('failWrapA2');
+      const idleWrap = document.getElementById('idleWrapA2');
+      const uploadWrap = document.getElementById('uploadWrapA2');
+      const rejoinPanel = document.getElementById('rejoinPanelA2');
+      const elapsedRow = document.getElementById('elapsedRowA2');
+      const meter = document.getElementById('meterA2');
+      const drop = document.getElementById('dropA2');
+      const videoCard = document.getElementById('videoCardA2');
+      const stageS1 = document.getElementById('stageS1_A2');
+      const stageS2 = document.getElementById('stageS2_A2');
+      const stageS3 = document.getElementById('stageS3_A2');
+      const stageS4 = document.getElementById('stageS4_A2');
+      const stageS5 = document.getElementById('stageS5_A2');
+
+      // reset
+      logWrap.style.display = 'none';
+      resultWrap.style.display = 'none';
+      failWrap.style.display = 'none';
+      idleWrap.style.display = 'none';
+      uploadWrap.style.display = 'none';
+      rejoinPanel.style.display = 'none';
+      rejoinBanner.style.display = 'none';
+      document.getElementById('stagesA2').style.display = 'grid';
+      meter.style.display = 'block';
+      elapsedRow.style.display = 'flex';
+      submit.classList.remove('disabled','accent');
+      submit.textContent = 'Start translation';
+      submit.classList.add('primary');
+      help.style.display = 'block';
+      help.textContent = '⌘ + ↵';
+      delLink.style.display = 'none';
+      formBadge.className = 'badge on';
+      formBadge.textContent = 'READY';
+      rightLbl.textContent = 'PROGRESS · ONE WINDOW';
+      progressBadge.className = 'badge on';
+      progressBadge.textContent = 'LIVE';
+      // file state: show video by default, drop zone only when idle
+      drop.style.display = 'none';
+      videoCard.style.display = 'flex';
+      // reset stages
+      stageS1.className = 'stage done';
+      stageS1.querySelector('.dur').textContent = '4.2s';
+      stageS2.className = 'stage done';
+      stageS2.querySelector('.dur').textContent = '6.1s';
+      stageS3.className = 'stage active';
+      stageS3.querySelector('.dur').textContent = '32s';
+      stageS4.className = 'stage pending';
+      stageS4.querySelector('.dur').textContent = '—';
+      stageS5.className = 'stage pending';
+      stageS5.querySelector('.dur').textContent = '—';
+
+      switch(s) {
+        case 'idle':
+          stateLbl.textContent = 'IDLE';
+          idleWrap.style.display = 'flex';
+          rightLbl.textContent = 'READY WHEN YOU ARE';
+          progressBadge.className = 'badge';
+          progressBadge.textContent = 'IDLE';
+          document.getElementById('stagesA2').style.display = 'none';
+          meter.style.display = 'none';
+          elapsedRow.style.display = 'none';
+          // no file yet → big drop zone, no video card
+          drop.style.display = 'flex';
+          videoCard.style.display = 'none';
+          break;
+        case 'uploading':
+          stateLbl.textContent = 'UPLOADING · 64%';
+          banner.classList.add('running');
+          uploadWrap.style.display = 'flex';
+          rightLbl.textContent = 'UPLOADING';
+          progressBadge.textContent = 'UPLOADING';
+          submit.classList.add('disabled');
+          submit.textContent = 'Uploading… 64%';
+          formBadge.textContent = 'BUSY';
+          formBadge.className = 'badge warn';
+          document.getElementById('stagesA2').style.display = 'none';
+          meter.style.display = 'none';
+          elapsedRow.style.display = 'none';
+          break;
+        case 'running':
+          stateLbl.textContent = 'RUNNING';
+          banner.classList.add('running');
+          logWrap.style.display = 'flex';
+          progressBadge.textContent = 'LIVE';
+          submit.classList.add('disabled');
+          submit.textContent = 'Job running…';
+          formBadge.textContent = 'LOCKED';
+          formBadge.className = 'badge warn';
+          break;
+        case 'succeeded':
+          stateLbl.textContent = 'DONE';
+          banner.classList.add('done');
+          resultWrap.style.display = 'flex';
+          rightLbl.textContent = 'RESULT · SAME WINDOW';
+          progressBadge.className = 'badge ok';
+          progressBadge.textContent = 'READY';
+          formBadge.textContent = 'LOCKED';
+          submit.textContent = 'Submit another';
+          submit.classList.remove('primary','disabled');
+          delLink.style.display = 'inline';
+          help.style.display = 'none';
+          stageS3.className = 'stage done';
+          stageS3.querySelector('.dur').textContent = '1:32';
+          stageS4.className = 'stage done';
+          stageS4.querySelector('.dur').textContent = '12s';
+          stageS5.className = 'stage done';
+          stageS5.querySelector('.dur').textContent = '3.1s';
+          meter.querySelector('span').style.width = '100%';
+          break;
+        case 'failed':
+          stateLbl.textContent = 'FAILED';
+          banner.classList.add('failed');
+          failWrap.style.display = 'flex';
+          rightLbl.textContent = 'FAILURE · SAME WINDOW';
+          progressBadge.className = 'badge err';
+          progressBadge.textContent = 'ERR';
+          formBadge.textContent = 'LOCKED';
+          submit.textContent = 'Submit another';
+          submit.classList.remove('primary','disabled');
+          delLink.style.display = 'inline';
+          help.style.display = 'none';
+          stageS3.className = 'stage fail';
+          stageS3.querySelector('.dur').textContent = '8s ✗';
+          break;
+        case 'rejoin':
+          stateLbl.textContent = 'REJOIN-BLOCKED';
+          banner.classList.add('running');
+          // right column becomes the decision surface; rejoin button only here
+          rejoinPanel.style.display = 'flex';
+          rightLbl.textContent = 'ACTION REQUIRED';
+          progressBadge.className = 'badge err';
+          progressBadge.textContent = 'BLOCKED';
+          document.getElementById('stagesA2').style.display = 'none';
+          meter.style.display = 'none';
+          elapsedRow.style.display = 'none';
+          // left column: submit disabled — command lives in right pane
+          submit.textContent = 'Waiting for server …';
+          submit.classList.add('disabled');
+          submit.classList.remove('accent');
+          formBadge.textContent = 'BLOCKED';
+          formBadge.className = 'badge err';
+          help.style.display = 'none';
+          break;
+      }
+    })();
+
+    // --- Sheet B ---
+    const formB = document.getElementById('formB');
+    const summaryB = document.getElementById('summaryB');
+    const progB = document.getElementById('progressB');
+    const resB = document.getElementById('resultB');
+    const failB = document.getElementById('failB');
+    const rejoinB = document.getElementById('rejoinB');
+
+    formB.style.display = 'block';
+    summaryB.style.display = 'none';
+    progB.style.display = 'none';
+    resB.style.display = 'none';
+    failB.style.display = 'none';
+    rejoinB.style.display = 'none';
+
+    if (s === 'idle') {
+      formB.style.display = 'block';
+    } else if (s === 'uploading' || s === 'running') {
+      formB.style.display = 'none';
+      summaryB.style.display = 'flex';
+      progB.style.display = 'block';
+    } else if (s === 'succeeded') {
+      formB.style.display = 'none';
+      summaryB.style.display = 'flex';
+      resB.style.display = 'block';
+    } else if (s === 'failed') {
+      formB.style.display = 'none';
+      summaryB.style.display = 'flex';
+      failB.style.display = 'block';
+    } else if (s === 'rejoin') {
+      formB.style.display = 'block';
+      rejoinB.style.display = 'block';
+    }
+
+    // --- Sheet C (cockpit: dim/light tiles) ---
+    const progC = document.getElementById('prog-C');
+    const resC = document.getElementById('result-C');
+    const termC = document.getElementById('terminal-C');
+    const errC = document.getElementById('errors-C');
+    const fileC = document.getElementById('file-C');
+    const langsC = document.getElementById('langs-C');
+    const subC = document.getElementById('submit-C');
+    const stateCel = document.getElementById('stateC');
+    const bannerC = document.getElementById('banner-C');
+
+    [progC, resC, termC, errC, fileC, langsC, subC].forEach(el => el.classList.remove('accent','dim'));
+    bannerC.classList.remove('running','done','failed');
+
+    // defaults
+    resC.classList.add('dim');
+    termC.classList.add('dim');
+    errC.classList.add('dim');
+    progC.classList.add('dim');
+
+    if (s === 'idle') {
+      stateCel.textContent = 'IDLE · ready to submit';
+      fileC.classList.remove('dim');
+      langsC.classList.remove('dim');
+      subC.classList.remove('dim');
+    } else if (s === 'uploading') {
+      stateCel.textContent = 'UPLOADING · 64%';
+      bannerC.classList.add('running');
+      progC.classList.remove('dim'); progC.classList.add('accent');
+      fileC.classList.add('dim'); langsC.classList.add('dim'); subC.classList.add('dim');
+    } else if (s === 'running') {
+      stateCel.textContent = 'RUNNING · STAGE 3 / 5';
+      bannerC.classList.add('running');
+      progC.classList.remove('dim'); progC.classList.add('accent');
+      fileC.classList.add('dim'); langsC.classList.add('dim'); subC.classList.add('dim');
+    } else if (s === 'succeeded') {
+      stateCel.textContent = 'DONE · result ready';
+      bannerC.classList.add('done');
+      resC.classList.remove('dim'); resC.classList.add('accent');
+      termC.classList.remove('dim');
+    } else if (s === 'failed') {
+      stateCel.textContent = 'FAILED · see errors';
+      bannerC.classList.add('failed');
+      errC.classList.remove('dim');
+      termC.classList.remove('dim');
+    } else if (s === 'rejoin') {
+      stateCel.textContent = 'REJOIN-BLOCKED · server busy';
+      bannerC.classList.add('running');
+      errC.classList.remove('dim');
+      progC.classList.remove('dim'); progC.classList.add('accent');
+    }
+
+    // --- Sheet D ---
+    const stateD = document.getElementById('stateD');
+    const resultBadgeD = document.getElementById('resultBadgeD');
+    const resultD = document.getElementById('resultD');
+    const formD = document.getElementById('formD');
+    resultD.classList.remove('accent');
+    formD.style.opacity = 1;
+    resultBadgeD.className = 'badge';
+    resultBadgeD.textContent = 'WAITING';
+    if (s === 'idle') { stateD.textContent = 'IDLE'; resultBadgeD.textContent = '—'; }
+    else if (s === 'uploading') { stateD.textContent = 'UPLOADING'; formD.style.opacity = 0.5; }
+    else if (s === 'running') { stateD.textContent = 'RUNNING'; formD.style.opacity = 0.5; }
+    else if (s === 'succeeded') {
+      stateD.textContent = 'DONE';
+      resultBadgeD.className = 'badge ok';
+      resultBadgeD.textContent = 'READY';
+      resultD.classList.add('accent');
+    }
+    else if (s === 'failed') {
+      stateD.textContent = 'FAILED';
+      resultBadgeD.className = 'badge err';
+      resultBadgeD.textContent = 'ERR';
+    }
+    else if (s === 'rejoin') {
+      stateD.textContent = 'REJOIN';
+      formD.style.opacity = 0.5;
+    }
+
+// --- log prominence (applies to A/B/C logs) ---
+    document.querySelectorAll('.log').forEach(l => {
+      l.style.maxHeight = state.log === 'first' ? '' : '60px';
+      l.style.opacity = state.log === 'tucked' ? 0.55 : 1;
+    });
+  }
+
+  applyState();
+
+  // --- subtle ticker: nudge a fake "live" cursor log line, only when running ---
+  setInterval(() => {
+    if (state.state !== 'running') return;
+    // nothing fancy — just blink is enough via CSS
+  }, 1000);
+})();
+</script>
+
+</body>
+</html>
