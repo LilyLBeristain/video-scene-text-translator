@@ -392,6 +392,49 @@ python -m pytest tests/ -v
 ruff check .
 ```
 
+## Web Application
+
+Browser-based UI for the same pipeline — upload a video, pick source/target
+languages, watch per-stage progress and live logs, download the result.
+FastAPI + React, single process, in-memory job queue. Source under `server/`
+(backend) and `web/` (frontend). See
+[`docs/architecture.md`](docs/architecture.md#web-application) for design.
+
+### Extra prerequisites
+- Node 20+ and npm (for the frontend bundle).
+- `ffmpeg` on PATH (for browser-safe MP4 transcode after the pipeline runs).
+
+### Install
+```bash
+# Backend deps (into the same vc_final env)
+pip install -r server/requirements.txt
+
+# Frontend deps
+cd web && npm install && cd ..
+```
+
+### Dev mode (hot-reload)
+```bash
+./server/scripts/dev.sh
+# uvicorn --reload on :8000, Vite on :5173 (proxies /api → :8000)
+# browse http://localhost:5173/
+```
+
+### Prod / demo mode (single port)
+```bash
+./server/scripts/build_frontend.sh
+# → builds web/dist, copies into server/app/static/
+python -m uvicorn server.app.main:app --host 0.0.0.0 --port 8000
+# browse http://localhost:8000/  (SPA + /api/* on the same origin)
+```
+
+### Tests
+```bash
+cd server && python -m pytest tests/ -v          # 87 default tests
+cd server && python -m pytest tests/ -v -m gpu   # 3 real-pipeline integration tests (requires GPU + AnyText2)
+cd web && npm run test                            # 60 frontend tests
+```
+
 ## Project Structure
 
 ```
@@ -436,4 +479,32 @@ checkpoints/
 third_party/
   co-tracker/                       # CoTracker3 (optical flow)
   SRNet/                            # SRNet (background inpainting for LCM)
+  Hi-SAM/                           # Hi-SAM (segmentation-based background inpainter)
+
+server/                             # FastAPI web backend (see Web Application above)
+  app/
+    main.py                         # FastAPI app + lifespan + SPA static mount
+    routes.py                       # 6 /api/* endpoints
+    jobs.py                         # JobManager: single-worker executor + per-job SSE queue
+    pipeline_runner.py              # VideoPipeline wrapper: log bridge + ffmpeg transcode
+    storage.py                      # uploads/outputs paths + TTL sweep
+    schemas.py                      # Pydantic v2 request/response + SSE event models
+    languages.py                    # curated 7-language dropdown list
+  scripts/
+    dev.sh                          # uvicorn :8000 + Vite :5173 in parallel
+    build_frontend.sh               # npm build + atomic copy into app/static/
+  tests/                            # 87 default + 3 gpu-marked integration tests
+
+web/                                # React 18 + Vite SPA
+  src/
+    api/                            # client + TS schemas + SSE helper
+    hooks/useJobStream.ts           # job-lifecycle reducer
+    components/
+      ui/                           # shadcn primitives (button, select, card, ...)
+      UploadForm.tsx                # upload + language pick + submit
+      JobView.tsx                   # composite view post-submit
+      StageProgress.tsx             # 5-pill progress
+      LogPanel.tsx                  # auto-following monospace log
+      ResultPanel.tsx               # <video> + download
+    styles/globals.css              # Tailwind + shadcn design tokens
 ```

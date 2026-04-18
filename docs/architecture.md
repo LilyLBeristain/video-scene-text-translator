@@ -249,16 +249,7 @@ type Event =
   ffmpeg surfaces as a `RuntimeError` → `ErrorEvent`.
 
 ### Running the app
-Dev mode — hot-reload backend + Vite dev server:
-```bash
-./server/scripts/dev.sh
-# uvicorn --reload on :8000, Vite on :5173, /api proxied to :8000
-```
-
-Prod/demo mode — build the SPA, serve everything from FastAPI:
-```bash
-./server/scripts/build_frontend.sh
-# → web/dist → server/app/static/
-python -m uvicorn server.app.main:app --host 0.0.0.0 --port 8000
-# browse http://localhost:8000/
-```
+Run instructions live in the [README's Web Application section](../README.md#web-application)
+(canonical). This doc covers design only; commands are kept out of here to
+avoid drift. tl;dr: `./server/scripts/dev.sh` for hot-reload dev,
+`./server/scripts/build_frontend.sh` then `uvicorn` for prod/demo.
