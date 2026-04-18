@@ -197,12 +197,12 @@ export function StageProgress({
         })}
       </ol>
 
-      <div className="flex items-center gap-2 px-1 pt-3 font-mono text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 px-1 pt-3 font-mono text-[11px] text-muted-foreground">
         <Clock aria-hidden className="h-3.5 w-3.5 opacity-60" />
+        <span>{elapsedReadout}</span>
         <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-[color:var(--bg-3)]">
           <div className="stripe-fill h-full w-full animate-stripe-flow" />
         </div>
-        <span>{elapsedReadout}</span>
       </div>
     </section>
   );
