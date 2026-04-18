@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import tailwindcssAnimate from 'tailwindcss-animate';
 
 // shadcn default theme: slate base color, CSS variables for tokens.
 // Mirrors the theme block produced by `npx shadcn@latest init`.
@@ -70,7 +71,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [require('tailwindcss-animate')],
+  plugins: [tailwindcssAnimate],
 };
 
 export default config;
