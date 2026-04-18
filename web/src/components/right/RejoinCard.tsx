@@ -18,6 +18,7 @@
 import type { JobStatus, Stage } from "@/api/schemas";
 
 import { Button } from "@/components/ui/button";
+import { STAGE_LABEL } from "@/lib/stages";
 
 interface RejoinCardProps {
   blockingJobId: string;
@@ -25,16 +26,6 @@ interface RejoinCardProps {
   blockingStatus: JobStatus | null;
   onRejoin: () => void;
 }
-
-// Stage code -> human label. Mirrors the server's stage taxonomy and the
-// plan's D5 ("keep technical stage names").
-const STAGE_LABEL: Record<Stage, string> = {
-  s1: "Detect",
-  s2: "Frontalize",
-  s3: "Edit",
-  s4: "Propagate",
-  s5: "Revert",
-};
 
 function formatStage(stage: Stage | null | undefined): string | null {
   if (!stage) return null;

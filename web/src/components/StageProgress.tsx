@@ -27,17 +27,8 @@ import { Check, Clock } from "lucide-react";
 
 import type { Stage } from "@/api/schemas";
 import type { StageState } from "@/hooks/useJobStream";
+import { STAGES, STAGE_LABEL } from "@/lib/stages";
 import { cn } from "@/lib/utils";
-
-// Human label map. Kept inline — RejoinCard has its own copy (Step 13 note);
-// extract into a shared util only when a third caller shows up.
-const STAGE_META: Array<{ stage: Stage; label: string }> = [
-  { stage: "s1", label: "Detect" },
-  { stage: "s2", label: "Frontalize" },
-  { stage: "s3", label: "Edit" },
-  { stage: "s4", label: "Propagate" },
-  { stage: "s5", label: "Revert" },
-];
 
 // Visual state per tile. `fail` is a rendering override — it is never in the
 // `StageState` union that `useJobStream` emits (that union is the truth about
@@ -86,7 +77,7 @@ function stageCode(stage: Stage): string {
 
 /** Index of a stage in the canonical 0..4 order. */
 function stageIndex(stage: Stage): number {
-  return STAGE_META.findIndex((m) => m.stage === stage);
+  return STAGES.indexOf(stage);
 }
 
 /** Resolve the visible state of a single tile, accounting for failedStage. */
@@ -112,7 +103,7 @@ export function StageProgress({
 }: StageProgressProps) {
   // Elapsed-row readout: prefer the live running tick, fall back to total
   // when everything is done, otherwise a neutral em-dash.
-  const allDone = STAGE_META.every(({ stage }) => stages[stage] === "done");
+  const allDone = STAGES.every((stage) => stages[stage] === "done");
   let elapsedReadout: string;
   if (
     !failedStage &&
@@ -121,8 +112,8 @@ export function StageProgress({
   ) {
     elapsedReadout = `${stageCode(currentStage)}/5 \u00B7 ${formatClock(activeStageElapsedMs)}`;
   } else if (allDone && !failedStage) {
-    const total = STAGE_META.reduce(
-      (acc, { stage }) => acc + (stageDurations[stage] ?? 0),
+    const total = STAGES.reduce(
+      (acc, stage) => acc + (stageDurations[stage] ?? 0),
       0,
     );
     elapsedReadout = `5/5 \u00B7 ${formatClock(total)}`;
@@ -136,7 +127,8 @@ export function StageProgress({
         aria-label="Pipeline progress"
         className="flex w-full items-stretch gap-2"
       >
-        {STAGE_META.map(({ stage, label }) => {
+        {STAGES.map((stage) => {
+          const label = STAGE_LABEL[stage];
           const rawState = stages[stage];
           const tileState = resolveTileState(stage, rawState, failedStage);
           const isActive = tileState === "active";

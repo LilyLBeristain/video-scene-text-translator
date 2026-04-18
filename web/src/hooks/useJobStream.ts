@@ -45,8 +45,8 @@ import type {
   SSEEvent,
   Stage,
 } from "@/api/schemas";
+import { STAGES } from "@/lib/stages";
 
-const STAGES: readonly Stage[] = ["s1", "s2", "s3", "s4", "s5"] as const;
 const LOG_CAP = 500;
 
 export type StageState = "pending" | "active" | "done";
