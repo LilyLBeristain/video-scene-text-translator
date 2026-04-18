@@ -1,5 +1,195 @@
 # Changelog
 
+## 2026-04-18 — Fix BPN Border Halo via Reflect-Padding (feat/mv_refine_to_s2)
+
+### Symptom
+
+With BPN enabled, every propagated ROI in the output video rendered as
+a visibly brighter blob than its surrounding unedited pixels. The
+brightness scaled monotonically with how much blur BPN predicted.
+
+### Root Cause
+
+`DifferentiableBlur.forward` called `F.conv2d(img, kern, padding=pad)`,
+which uses **zero-padding**. Convolving against zero-padded borders
+darkens the blurred output near the ROI edges: a pixel at the boundary
+integrates its normalized kernel over a window that's partially
+outside the image, and the "outside" contributes zero.
+
+The differential-blur formula `I_out = (1+w)*I - w*blurred` with `w<0`
+propagates this: interior pixels are unaffected, but border pixels pick
+up the artificial darkness.
+
+S5 then composites via `cv2.seamlessClone`, which solves Poisson with
+the source's gradient field and the destination frame's boundary
+values. The Poisson solve:
+- Anchors the composite to the frame's boundary (matches surroundings).
+- Integrates the source's gradient field inward from that boundary.
+
+Because BPN had artificially darkened the source's border, the "source
+interior minus source border" was positive, so the integrated composite
+interior sat **above** the frame's ambient — a bright halo. Stronger
+BPN (bigger effective kernel, larger |w|) → bigger border darkening →
+bigger halo.
+
+### Investigation
+
+Per-call diagnostic logging was added to `BPNPredictor.apply_blur`
+(since removed) measuring `(sigma_x, sigma_y, w, mean_before,
+mean_after, Δmean, clamp fractions)`. Initial read of 482 calls on one
+video showed all 482 Δ values negative (BPN darkening per-pixel mean
+by ~2.5% on average) — which was a red herring. User confirmed two
+key observations that pinned the mechanism:
+
+1. With sigma=31 and |w|=0.28 the ROI only looked slightly blurred
+   (kernel truncation at 41 px caps effective blur; the huge sigmas
+   from an out-of-distribution BPN checkpoint weren't the primary
+   issue).
+2. Composite border pixels matched the frame's ambient perfectly; the
+   interior sat above. This rules out a constant brightness shift in
+   the source and points at a gradient integrated from a biased
+   boundary.
+
+Together: the boundary condition was correct (Poisson enforces frame's
+ambient at the border), but the source had an artificially dark border
+that translated into a positive inward gradient integral.
+
+### Fix
+
+[code/src/models/bpn/blur.py:86-92](code/src/models/bpn/blur.py#L86-L92) — replace
+
+    F.conv2d(img_flat, kern_flat, padding=pad, groups=B * C)
+
+with
+
+    img_padded = F.pad(img_flat, (pad, pad, pad, pad), mode="reflect")
+    F.conv2d(img_padded, kern_flat, padding=0, groups=B * C)
+
+Reflect-padding mirrors the image's own pixels into the kernel support
+at the boundary, so the convolution is mean-preserving all the way to
+the edge. No more artificial dark rim; no more Poisson halo.
+
+### Verification
+
+- Per-call Δmean dropped from ~-0.025 (zero-pad) to ~-0.0001 (reflect-
+  pad) — two orders of magnitude — on the same video with identical
+  predicted params. User confirmed the halo is gone in the composite.
+- On a flat 0.5 input, reflect-padded output is 0.5000 at every pixel
+  including the corners. Zero-padded output dropped below 0.5 near the
+  border depending on sigma.
+- Border-vs-interior mean difference on a random image dropped from
+  ~0.06 at |w|=0.5 to ~0.002 (sampling noise).
+
+### Testing
+
+- New `test_bpn_blur.py` with 5 regression tests under
+  `TestBorderPreservation` (flat-image exact preservation, random-image
+  border-vs-interior bound, identity at w=0) and `TestShapeContract`
+  (shape, [0, 1] range under aggressive sharpen).
+- 438 → 443 tests passing.
+
+### Note on BPN Predictions
+
+The diagnostic surfaced a secondary issue worth revisiting later: the
+current checkpoint predicts `sigma_x` up to 35 (median 15) and `|w|`
+up to 0.88, far outside the Stage 1 training range (sigma ∈ [0.3, 1.8],
+|w| ≤ 0.4). The fixed 41-px kernel absorbs most of the damage by
+truncating the Gaussian support, but the predictions still suggest
+Stage 2 self-supervised training drifted to explain misalignment as
+blur. With S2 refinement now handling geometric error, retraining BPN
+(or optionally clamping sigma/|w| to Stage 1 range at inference) is a
+worthwhile follow-up. Not done in this commit; `adv.yaml` leaves
+`use_bpn: false` by default.
+
+## 2026-04-18 — Alignment Refiner Moved from S5 to S2 (feat/mv_refine_to_s2)
+
+### Why
+
+The trained ROI alignment refiner predicts a residual homography ΔH
+that corrects CoTracker drift between the reference and target
+canonical ROIs. Previously applied at S5 (compositing), the correction
+only benefited the final warp — S3 (text editing) and S4 (LCM, BPN)
+still read the uncorrected `H_to_frontal`, so S4's per-pixel ratio map
+between `ref_canonical` and `target_canonical` was computed on a
+misaligned pair. Moving the refiner into S2 folds ΔH into
+`H_to_frontal` / `H_from_frontal` up front, so every downstream stage
+reads the corrected geometry automatically — no per-stage wiring.
+
+### Direction Convention
+
+ΔH is a forward homography in canonical pixel space mapping
+ref-canonical → target-canonical (same contract as the training
+dataset). At S2 we fold it in as:
+- `H_to_frontal_corrected = inv(ΔH) @ H_to_frontal_unrefined`
+- `H_from_frontal_corrected = H_from_frontal_unrefined @ ΔH`
+
+Pinned by `test_refiner_direction_pinning` in
+`test_s2_frontalization.py`: a 3-px canonical x-translate ΔH shifts a
+frame-space midpoint's corrected projection by exactly 3 canonical
+pixels in the opposite direction.
+
+### FrontalizationStage
+
+- `compute_homographies(track, frames=None)` — when
+  `frontalization.use_refiner` is on and frames are provided, builds
+  `ref_canonical` once per track, warps each target frame through the
+  unrefined `H_to_frontal` to produce `target_canonical`, calls
+  `RefinerInference.predict_delta_H`, and folds ΔH into both `H`
+  matrices on the detection. Reference frame is skipped
+- `run(tracks, frames=None)` — new `frames` kwarg threaded in from
+  `pipeline.py`. Backward-compatible: TPM data gen pipeline's
+  `s2.run(tracks)` still works because `frames=None` silently bypasses
+  refinement
+- Rejection counters logged at track-aggregate level (DEBUG by
+  default, INFO when rejection rate ≥ `refiner_rejection_warn_threshold`)
+
+### Configuration
+
+- Add 8 `FrontalizationConfig.refiner_*` fields mirroring the S5
+  shape: `use_refiner`, `refiner_checkpoint_path`, `refiner_device`,
+  `refiner_image_size`, `refiner_max_corner_offset_px`,
+  `refiner_rejection_warn_threshold`, `use_refiner_gate`,
+  `refiner_score_margin`
+- New validator rule: `frontalization.use_refiner` and
+  `revert.use_refiner` cannot both be True — would double-correct
+  the homography
+- `adv.yaml` — refiner block moved to `frontalization:` with
+  `use_refiner: true`; `revert.use_refiner` flipped to `false` while
+  the S5 refiner block remains as fallback (no code removed)
+
+### S5 and S4 Unchanged
+
+- S5 refiner code path is intact — runs only when
+  `revert.use_refiner: true` in config. Identical logic to before
+- S5's existing composition `T @ H_from_frontal @ ΔH` naturally becomes
+  `T @ H_from_frontal_corrected` when S2 does the correction — zero
+  S5 code changes needed to consume the new geometry
+- S4's `_warp_to_canonical` (stage.py:154) reads `det.H_to_frontal`
+  directly, so the LCM ratio map now sees a pixel-aligned
+  `(ref_canonical, target_canonical)` pair — the motivating quality
+  win of this migration
+
+### Testing
+
+- 6 new `TestRefinerIntegration` cases in
+  `test_s2_frontalization.py`: refiner-disabled backward-compat pin,
+  ΔH folding direction pin, reference-frame skip, rejection-fallback
+  to baseline, frames-omitted pathway (TPM use case), direction
+  pinning against a known 3-px canonical translate
+- 5 new `TestPipelineConfig` cases: not-both stage refiners allowed,
+  S2-refiner-alone valid, S2 checkpoint required, S2 bad max corner
+  offset, S2 bad rejection threshold
+- Updated `test_from_yaml_adv_parses_refiner_fields` to assert
+  refiner config now lives in `frontalization:` and `revert.use_refiner`
+  is off
+- 438 total tests passing
+
+### Rollout Plan
+
+See `docs/s2_refiner_migration_plan.md` §Rollout for the ablation
+protocol — verify on `real_video15` + one harder video before trusting
+S2 refinement as the default.
+
 ## 2026-04-18 — Hi-SAM Segmentation-Based Inpainter (feat/text_seg)
 
 ### New S4 Inpainter Backend

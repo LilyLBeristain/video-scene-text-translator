@@ -94,6 +94,23 @@ class FrontalizationConfig:
     homography_method: str = "RANSAC"
     ransac_reproj_threshold: float = 5.0
 
+    # S2 alignment refiner. When enabled, predicts a residual homography
+    # (ΔH) between each target frame's canonical ROI and the reference
+    # canonical ROI, and folds it into H_to_frontal / H_from_frontal so
+    # all downstream stages (S3 editing, S4 LCM/BPN, S5 composite) see
+    # pre-aligned canonical ROIs. The same RefinerInference wrapper as
+    # S5 is used; only the composition point differs. See
+    # docs/s2_refiner_migration_plan.md for the direction derivation.
+    # Cannot be combined with revert.use_refiner — pick one location.
+    use_refiner: bool = False
+    refiner_checkpoint_path: str = "checkpoints/refiner/refiner_v0.pt"
+    refiner_device: str = "cuda"
+    refiner_image_size: tuple[int, int] = (64, 128)  # (H, W) at network input
+    refiner_max_corner_offset_px: float = 16.0
+    refiner_rejection_warn_threshold: float = 0.1
+    use_refiner_gate: bool = True
+    refiner_score_margin: float = 0.01
+
 
 @dataclass
 class PropagationConfig:
@@ -370,5 +387,25 @@ class PipelineConfig:
             if self.revert.refiner_max_corner_offset_px <= 0:
                 errors.append(
                     "revert.refiner_max_corner_offset_px must be > 0"
+                )
+        if self.frontalization.use_refiner and self.revert.use_refiner:
+            errors.append(
+                "frontalization.use_refiner and revert.use_refiner cannot "
+                "both be True — pick one location for the refiner "
+                "(applying it twice double-corrects the homography)"
+            )
+        if self.frontalization.use_refiner:
+            if not self.frontalization.refiner_checkpoint_path:
+                errors.append(
+                    "frontalization.refiner_checkpoint_path is required when "
+                    "frontalization.use_refiner is True"
+                )
+            if not (0.0 <= self.frontalization.refiner_rejection_warn_threshold <= 1.0):
+                errors.append(
+                    "frontalization.refiner_rejection_warn_threshold must be in [0, 1]"
+                )
+            if self.frontalization.refiner_max_corner_offset_px <= 0:
+                errors.append(
+                    "frontalization.refiner_max_corner_offset_px must be > 0"
                 )
         return errors

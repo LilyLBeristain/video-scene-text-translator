@@ -136,6 +136,66 @@ class TestPipelineConfig:
         errors = config.validate()
         assert errors == []
 
+    def test_refiner_not_both_stages_allowed(self):
+        """S2 and S5 refiners cannot both be enabled at once."""
+        config = PipelineConfig()
+        config.input_video = "in.mp4"
+        config.output_video = "out.mp4"
+        config.frontalization.use_refiner = True
+        config.revert.use_refiner = True
+        config.revert.refiner_checkpoint_path = "some/path.pt"
+        config.propagation.save_target_canonical_roi = True
+        errors = config.validate()
+        assert any(
+            "frontalization.use_refiner and revert.use_refiner" in e
+            for e in errors
+        )
+
+    def test_s2_refiner_alone_valid(self):
+        """S2 refiner enabled (S5 off) passes validation."""
+        config = PipelineConfig()
+        config.input_video = "in.mp4"
+        config.output_video = "out.mp4"
+        config.frontalization.use_refiner = True
+        config.frontalization.refiner_checkpoint_path = "some/path.pt"
+        config.revert.use_refiner = False
+        errors = config.validate()
+        assert errors == []
+
+    def test_s2_refiner_requires_checkpoint(self):
+        """S2 refiner without a checkpoint path must fail."""
+        config = PipelineConfig()
+        config.input_video = "in.mp4"
+        config.output_video = "out.mp4"
+        config.frontalization.use_refiner = True
+        config.frontalization.refiner_checkpoint_path = ""
+        errors = config.validate()
+        assert any(
+            "frontalization.refiner_checkpoint_path" in e for e in errors
+        )
+
+    def test_s2_refiner_bad_max_corner_offset(self):
+        config = PipelineConfig()
+        config.input_video = "in.mp4"
+        config.output_video = "out.mp4"
+        config.frontalization.use_refiner = True
+        config.frontalization.refiner_max_corner_offset_px = 0.0
+        errors = config.validate()
+        assert any(
+            "frontalization.refiner_max_corner_offset_px" in e for e in errors
+        )
+
+    def test_s2_refiner_bad_rejection_threshold(self):
+        config = PipelineConfig()
+        config.input_video = "in.mp4"
+        config.output_video = "out.mp4"
+        config.frontalization.use_refiner = True
+        config.frontalization.refiner_rejection_warn_threshold = 1.5
+        errors = config.validate()
+        assert any(
+            "frontalization.refiner_rejection_warn_threshold" in e for e in errors
+        )
+
     def test_from_yaml(self):
         data = {
             "input_video": "/path/to/video.mp4",
@@ -173,16 +233,18 @@ class TestPipelineConfig:
         assert config.detection.ocr_confidence_threshold == 0.3
 
     def test_from_yaml_adv_parses_refiner_fields(self):
-        """Load the checked-in adv.yaml and verify the refiner block
-        parses cleanly into RevertConfig."""
+        """Load the checked-in adv.yaml and verify the refiner config
+        parses cleanly. The refiner lives in S2 (frontalization) now;
+        S5's refiner block is kept as a fallback but switched off."""
         config = PipelineConfig.from_yaml("config/adv.yaml")
-        assert config.revert.use_refiner is True
-        assert config.revert.refiner_checkpoint_path  # non-empty path
-        assert tuple(config.revert.refiner_image_size) == (64, 128)
-        assert config.revert.refiner_max_corner_offset_px == 16.0
-        assert config.revert.refiner_rejection_warn_threshold == 0.1
-        # And S4's save flag must be on so the validator can accept it.
-        assert config.propagation.save_target_canonical_roi is True
+        # S2 refiner is the active config.
+        assert config.frontalization.use_refiner is True
+        assert config.frontalization.refiner_checkpoint_path  # non-empty path
+        assert tuple(config.frontalization.refiner_image_size) == (64, 128)
+        assert config.frontalization.refiner_max_corner_offset_px == 16.0
+        assert config.frontalization.refiner_rejection_warn_threshold == 0.1
+        # S5 refiner is the fallback — kept in config, switched off.
+        assert config.revert.use_refiner is False
 
     def test_from_yaml_adv_validates(self):
         """The refiner rules inside validate() must not reject adv.yaml.

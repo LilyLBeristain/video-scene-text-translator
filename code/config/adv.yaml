@@ -58,6 +58,18 @@ frontalization:
   # Homography computation (frame quad → canonical frontal rectangle)
   homography_method: "RANSAC"
   ransac_reproj_threshold: 5.0
+  # S2 alignment refiner: predicts a residual homography between
+  # reference and target canonical ROIs and folds it into H_to_frontal /
+  # H_from_frontal so S3/S4/S5 all see pre-aligned canonical ROIs.
+  # Cannot be combined with revert.use_refiner (validator enforces).
+  use_refiner: true
+  refiner_checkpoint_path: "../checkpoints/refiner/refiner_v1.pt"
+  refiner_device: "cuda"
+  refiner_image_size: [64, 128]  # (H, W) network input — must match training
+  refiner_max_corner_offset_px: 16.0
+  refiner_rejection_warn_threshold: 0.1
+  use_refiner_gate: true
+  refiner_score_margin: 0.01
 
 propagation:
   color_space: "YCrCb"
@@ -85,6 +97,7 @@ propagation:
   # checkpoint was trained at.
   use_bpn: false
   bpn_checkpoint_path: "../checkpoints/bpn/bpn_v0.pt"
+  #bpn_checkpoint_path: "checkpoints/bpn/bpn_stage1_best.pt"
   bpn_device: "cuda"
   bpn_n_neighbors: 3
   bpn_image_size: [64, 128]  # (H, W) at training time
@@ -101,7 +114,9 @@ revert:
   # reference and target canonical ROIs, composing it into the warp
   # chain to correct residual CoTracker tracking error. See
   # code/src/models/refiner/README.md for the network design.
-  use_refiner: true
+  # The refiner now lives in S2 (frontalization). Keep this switch
+  # off here — enabling both S2 and S5 refiners would double-correct.
+  use_refiner: false
   refiner_checkpoint_path: "../checkpoints/refiner/refiner_v1.pt"
   refiner_device: "cuda"
   refiner_image_size: [64, 128]  # (H, W) network input — must match training

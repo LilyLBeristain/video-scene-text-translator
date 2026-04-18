@@ -67,7 +67,7 @@ class VideoPipeline:
 
         # S2: Frontalization (computes homographies, writes into TextDetection)
         logger.info("=== Stage 2: Frontalization ===")
-        tracks = self.s2.run(tracks)
+        tracks = self.s2.run(tracks, frames)
 
         # S3: Text Editing
         logger.info("=== Stage 3: Text Editing ===")
