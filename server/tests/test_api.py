@@ -78,6 +78,30 @@ def _make_app(runner: PipelineRunner) -> FastAPI:
     return app
 
 
+@pytest.fixture(autouse=True)
+def _reset_sse_starlette_app_status():
+    """Clear sse-starlette's module-global ``AppStatus`` between tests.
+
+    ``sse_starlette.sse.AppStatus.should_exit_event`` is lazily created
+    as an ``anyio.Event`` on the first SSE request and bound to the
+    event loop that served it. ``TestClient`` spins up a fresh loop per
+    ``with TestClient(...)`` block, so a later test reusing the same
+    process trips over "bound to a different event loop" when two SSE
+    tests run in sequence. Resetting the module-global before and after
+    each test dodges this cleanly.
+
+    This fixture already exists in test_integration.py for the same
+    reason — we mirror it here because test_api also opens SSE streams.
+    """
+    from sse_starlette import sse as _sse
+
+    _sse.AppStatus.should_exit_event = None
+    _sse.AppStatus.should_exit = False
+    yield
+    _sse.AppStatus.should_exit_event = None
+    _sse.AppStatus.should_exit = False
+
+
 @pytest.fixture
 def storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect server storage to a tmp dir for the duration of the test."""
@@ -513,6 +537,96 @@ def test_events_endpoint_streams_sse_to_terminal(storage_root: Path):
     done_frame = next(f for f in frames if f.get("event") == "done")
     done_data = json.loads(done_frame["data"])
     assert done_data["output_url"] == f"/api/jobs/{job_id}/output"
+
+
+def test_events_endpoint_multicast_to_concurrent_subscribers(storage_root: Path):
+    """Two concurrent /events streams on the same job both see every event.
+
+    This is the HTTP-layer pin on plan.md's SSE multicast fan-out. The unit
+    test in test_jobs.py (`test_multiple_concurrent_subscribers_both_receive_
+    all_events`) covers `JobManager.subscribe` directly; this one exercises
+    the full stack — sse-starlette `EventSourceResponse`, the route handler,
+    and the TestClient streaming transport — so a regression in any of those
+    layers would show up here instead of silently splitting events.
+    """
+    # Gated runner — runner waits until BOTH SSE subscribers have attached
+    # their per-subscriber queues, then emits the sequence. Ensures neither
+    # subscriber misses any event to the no-replay semantic.
+    start_emitting = threading.Event()
+
+    def runner(
+        *,
+        job_id: str,
+        input_path: Path,
+        output_path: Path,
+        source_lang: str,
+        target_lang: str,
+        emit: Callable[[SSEEvent], None],
+    ) -> None:
+        if not start_emitting.wait(timeout=5):
+            raise AssertionError("SSE subscribers never attached")
+        t0 = time.time()
+        emit(StageStartEvent(stage="s1", ts=t0))
+        emit(StageCompleteEvent(stage="s1", duration_ms=1.0, ts=t0))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"FAKE MP4 BYTES")
+        emit(
+            DoneEvent(
+                output_url=f"/api/jobs/{job_id}/output", ts=time.time()
+            )
+        )
+
+    app = _make_app(runner)
+
+    with TestClient(app) as client:
+        job_id = _post_job(client).json()["job_id"]
+
+        # Two independent consumers, each on its own thread — TestClient's
+        # streaming API is synchronous and blocks the calling thread until
+        # the server finishes the response. Each thread collects its frames
+        # into a shared list that we inspect post-run.
+        results: dict[str, list[dict]] = {"a": [], "b": []}
+
+        def _consume(label: str) -> None:
+            with client.stream("GET", f"/api/jobs/{job_id}/events") as resp:
+                results[label] = _parse_sse_stream(resp)
+
+        t_a = threading.Thread(target=_consume, args=("a",), daemon=True)
+        t_b = threading.Thread(target=_consume, args=("b",), daemon=True)
+        t_a.start()
+        t_b.start()
+
+        # Wait for BOTH subscribers to register their queues before firing
+        # the runner's emit sequence.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            mgr = app.state.job_manager
+            record = mgr._jobs.get(job_id)
+            if record is not None and len(record._subscribers) >= 2:
+                start_emitting.set()
+                break
+            time.sleep(0.005)
+        else:
+            start_emitting.set()  # safety release if polling timed out
+            raise AssertionError(
+                "fewer than 2 SSE subscribers attached within 5s"
+            )
+
+        t_a.join(timeout=10)
+        t_b.join(timeout=10)
+
+    # Assert — both subscribers received the full event sequence.
+    for label, frames in results.items():
+        types_seen = [f["event"] for f in frames if "event" in f]
+        assert "stage_start" in types_seen, (
+            f"subscriber {label} missing stage_start: {types_seen}"
+        )
+        assert "stage_complete" in types_seen, (
+            f"subscriber {label} missing stage_complete: {types_seen}"
+        )
+        assert "done" in types_seen, (
+            f"subscriber {label} missing done: {types_seen}"
+        )
 
 
 def test_events_endpoint_404_for_unknown_id(storage_root: Path):
