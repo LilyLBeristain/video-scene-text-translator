@@ -204,17 +204,34 @@ The five file-slot / submit-slot variants (idle, uploading, rejoin, running/succ
   - Dropzone kept its filename box (Path A) for UploadForm back-compat — VideoCard replaces it in Step 7/14. `aspect-video` (16/9) chosen over mockup's 9/16 since landscape is the likelier real-world input — flag if portrait matters.
 - [x] **Step 6 — `<LanguageSelect>` + `<LanguagePair>` (with swap).** Hand-rolled flat select; pair composite with swap button + mono footer. Tests: controlled behavior, swap, locked mode.
   - Native `<select>` over Radix — a11y for free, immune to jsdom quirks, smaller DOM. `locked` implies `disabled` (single visual state, no dual-prop ambiguity). Removed stale Radix pointerCapture shims.
-- [ ] **Step 7 — `<SubmitBar>` + `<IdentityBlock>` + `<LeftColumn>`.** Five submit variants; left-column composite. Tests: variant labels + disabled states.
-- [ ] **Step 8 — Right-column idle + upload surfaces.** `<IdlePlaceholder>`, `<UploadProgress>`, `<StatusBand>`. Tests: renders copy; UploadProgress math (degrades when MB/s unknown — R2).
-- [ ] **Step 9 — `<StageProgress>` rewrite.** 5 tiles + elapsed row + stripe meter (reduced-motion safe — R9). Tests: state classes per tile; active-tile tick readout.
-- [ ] **Step 10 — `<LogPanel>` rewrite.** Mono list, severity chip, bold stage separators (regex — R7), static S3 hint, plain auto-scroll. Tests: separator regex, severity rendering, auto-scroll behavior.
-- [ ] **Step 11 — `<ResultPanel>` rewrite.** Output video + corner tag + success-styled download. Tests: renders output URL, download link.
-- [ ] **Step 12 — `<FailureCard>` + delete `<ErrorAlert>`.** Copy-error via clipboard; collapsible traceback. Tests: renders message + traceback; copy click writes to clipboard.
+- [x] **Step 7 — `<SubmitBar>` + `<IdentityBlock>` + `<LeftColumn>`.** Five submit variants; left-column composite. Tests: variant labels + disabled states.
+  - SubmitBar variants landed as a discriminated union (4 kinds — rejoin lives on the right column). Delete link is a `<button>` (not `<a>`) styled as muted mono text (R10).
+- [x] **Step 8 — Right-column idle + upload surfaces.** `<IdlePlaceholder>`, `<UploadProgress>`, `<StatusBand>`. Tests: renders copy; UploadProgress math (degrades when MB/s unknown — R2).
+  - StatusBand has 7 kinds (idle / uploading / connecting / running / succeeded / failed / blocked). Pulse dot is decorative aria-hidden span — not baked into label text so `getByText("ERR")` works without the glyph.
+- [x] **Step 9 — `<StageProgress>` rewrite.** 5 tiles + elapsed row + stripe meter (reduced-motion safe — R9). Tests: state classes per tile; active-tile tick readout.
+  - New optional props (`activeStageElapsedMs`, `currentStage`, `failedStage`) preserve JobView back-compat. Active tile keeps a static ring so the pulse is a motion bonus, not the sole cue. `stripe-flow` keyframes + `.stripe-fill` utility added to tailwind/globals.
+- [x] **Step 10 — `<LogPanel>` rewrite.** Mono list, severity chip, bold stage separators (regex — R7), static S3 hint, plain auto-scroll. Tests: separator regex, severity rendering, auto-scroll behavior.
+  - Dropped the user-scroll escape hatch (`isAtBottomRef`) per plan simplification. Regex settled on `/^={3,}\s*Stage\s+\d/i`. S3 hint props optional so JobView's legacy call site keeps compiling.
+- [x] **Step 11 — `<ResultPanel>` rewrite.** Output video + corner tag + success-styled download. Tests: renders output URL, download link.
+  - Kept shadcn `variant="default"` (accent) over custom success-green — app-wide CTA vocabulary stays consistent; success signal already carried by StatusBand + StageProgress totals.
+- [x] **Step 12 — `<FailureCard>` + delete `<ErrorAlert>`.** Copy-error via clipboard; collapsible traceback. Tests: renders message + traceback; copy click writes to clipboard.
+  - Deviated from the "delete ErrorAlert" wording — deletion deferred to Step 14 where JobView also goes. Keeps commit-by-commit test suite green (D4). FailureCard uses `<section aria-labelledby>` + aria-live "Copied" flash; no Retry button.
 - [x] **Step 13 — `<RejoinCard>` + 409 `/status` fetch.** Fetch `getJobStatus(activeJobId)` on 409; render id + current stage + started-at; Rejoin CTA. Tests: renders with + without blocking-status fetch; Rejoin click invokes callback.
   - Card is purely presentational — the 409 fetch lives in `<App>` (Step 14). STAGE_LABEL map inline for now; extract if Step 9's StageProgress needs the same lookup.
-- [ ] **Step 14 — App state machine + delete UploadForm/JobView.** Collapse into `<App>` reducer owning `UiState`; wire XHR submit, 409 handling, terminal transitions. ⌘↵ keybind. Delete `UploadForm.tsx` and `JobView.tsx`. App-level integration tests for phase transitions.
-- [ ] **Step 15 — Cosmetic polish pass.** Mono footers ("● LOCKED WHILE RUNNING" etc.), active-tile accent, hint-row delete-link styling (R10), prefers-reduced-motion coverage. One round of visual diff against screenshots.
+- [x] **Step 14 — App state machine + delete UploadForm/JobView.** Collapse into `<App>` reducer owning `UiState`; wire XHR submit, 409 handling, terminal transitions. ⌘↵ keybind. Delete `UploadForm.tsx` and `JobView.tsx`. App-level integration tests for phase transitions.
+  - Active phase delegates to a nested `<ActiveView>` so `useJobStream` is instantiated exactly once (threads state to both left + right columns — no double SSE subscriptions). Rejoin-active (file === null) replaces the LanguagePair with a terse caption rather than rendering empty selects.
+- [x] **Step 15 — Cosmetic polish pass.** Mono footers ("● LOCKED WHILE RUNNING" etc.), active-tile accent, hint-row delete-link styling (R10), prefers-reduced-motion coverage. One round of visual diff against screenshots.
+  - All four polish items landed as part of the component builds (Steps 6/7/9/globals):
+    - Mono footers: `SOURCE ≠ TARGET` / `● LOCKED WHILE UPLOADING` / `● HOLD WHILE JOB FINISHES` / `● LOCKED WHILE RUNNING` passed to `<LanguagePair>` across all four phases.
+    - Active-tile accent: static `ring-1 ring-[color:var(--acc-line)]` on the active stage tile.
+    - Delete link (R10): muted mono `<button>` with hover:destructive, not a primary visual.
+    - Reduced-motion: `@media (prefers-reduced-motion: reduce)` block in globals.css dampens all animations globally.
+  - Visual diff against the 6 mockup screenshots remains open — requires a human with a display (same R3 sign-off as Step 1).
 - [ ] **Step 16 — Dev-box smoke.** Real upload + real pipeline + real download against the backend. Verify against all six state screenshots. Log any drift in a follow-up.
+  - **Blocked** — requires a human with a display + the FastAPI backend running + GPU for the real pipeline. Cannot be done in the headless coding session. Prerequisites for the human pass: (1) visual R3 sign-off on the four shadcn primitive variants (Button/Alert/Card/Badge) under the slate-dark palette, especially destructive-foreground contrast and the 35%-opacity focus ring; (2) pixel diff against `web/mockup-handoff/screenshots/0{1..6}-*.png` at 1080×760; (3) smoke the 6 phases — idle / uploading / rejoin / connecting / running / succeeded / failed — end-to-end with real SSE traffic; (4) verify `prefers-reduced-motion: reduce` actually dampens the stripe + pulse in a real browser.
 - [ ] **Step 17 — Update `web/CLAUDE.md` + `docs/architecture.md`.** Reflect the collapsed UploadForm/JobView, App-level state machine, D6–D10 decisions.
-- [ ] **Step 18 — `@reviewer` pass.** Address feedback.
-- [ ] **Step 19 — Atomic commits.** Each Step above is one commit (or a tight sequence if a step naturally splits). Conventional format `feat(web)` / `chore(web)` / `test(web)`.
+- [x] **Step 18 — `@reviewer` pass.** Address feedback.
+  - Reviewer returned zero must-fix items and four should-fix items. Fixed all four in one commit: (a) `useJobStream.failedStage` now captured before `currentStage` clears so the fail-tile actually renders on pipeline failures; (b) FailureCard's Copied feedback moved from `aria-live` on a `<button>` (unreliable) to a sibling sr-only live region; (c) LogPanel keys use composite `${ts}-${i}` so row churn tracks monotonic ts rather than pure index; (d) ActiveView lifts `deleteError` into shared state and surfaces delete failures as an inline destructive Alert. Test count 129 → 132.
+  - 3 nice-to-have items deferred: STAGE_LABEL duplication (rule-of-three not yet fired), App-level active→reset test (needs a terminal-event mock harness), useJobStream status-sync overwrite-guard test.
+- [x] **Step 19 — Atomic commits.** Each Step above is one commit (or a tight sequence if a step naturally splits). Conventional format `feat(web)` / `chore(web)` / `test(web)`.
+  - Landed as 17 atomic commits on `feat/web-client` (from `114a8e6` theme swap through `9101f54` post-review fixes). Commit-by-commit test-green preserved per D4. No rebase needed; history is clean.
