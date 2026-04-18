@@ -16,6 +16,7 @@ import type {
   JobCreateResponse,
   JobStatus,
   Language,
+  UploadProgress,
 } from "./schemas";
 
 const BASE = "/api";
@@ -83,14 +84,7 @@ async function handleResponse<T>(resp: Response): Promise<T> {
     } catch {
       // Body already consumed or malformed — fall through with null detail.
     }
-    if (
-      detail &&
-      typeof detail === "object" &&
-      "detail" in (detail as Record<string, unknown>)
-    ) {
-      detail = (detail as { detail: unknown }).detail;
-    }
-    throw new ApiError(resp.status, detail);
+    throw new ApiError(resp.status, unwrapFastapiDetail(detail));
   }
 
   const contentType = resp.headers.get("content-type") ?? "";
@@ -100,6 +94,22 @@ async function handleResponse<T>(resp: Response): Promise<T> {
   // Fall back to text — used by the few endpoints that might return plain
   // text (none right now, but keeps the helper honest).
   return (await resp.text()) as unknown as T;
+}
+
+/**
+ * FastAPI wraps error bodies as `{"detail": ...}`. Unwrap one level so
+ * callers see the inner payload directly. Used by both the fetch path
+ * (`handleResponse`) and the XHR path (`createJob`).
+ */
+function unwrapFastapiDetail(body: unknown): unknown {
+  if (
+    body &&
+    typeof body === "object" &&
+    "detail" in (body as Record<string, unknown>)
+  ) {
+    return (body as { detail: unknown }).detail;
+  }
+  return body;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,17 +126,114 @@ export async function getLanguages(): Promise<Language[]> {
   return handleResponse(resp);
 }
 
-export async function createJob(
+/**
+ * Multipart POST to `/api/jobs`.
+ *
+ * Unlike the other helpers this one runs on `XMLHttpRequest`, not `fetch`,
+ * because `fetch` has no upload-progress API and the Uploading UI state
+ * needs live `%` / MB-per-second / ETA readouts (plan D1). The `onProgress`
+ * callback fires on every XHR `upload.progress` event with an
+ * `UploadProgress` snapshot — `bytesPerSec` and `etaSeconds` stay `null`
+ * until at least ~1 s of elapsed time, guarding the divide-by-zero path on
+ * browsers that coalesce progress events (plan R2).
+ *
+ * The fourth argument is optional so existing three-arg callers keep
+ * compiling without change.
+ */
+export function createJob(
   video: File,
   sourceLang: string,
   targetLang: string,
+  options?: {
+    onProgress?: (p: UploadProgress) => void;
+    signal?: AbortSignal;
+  },
 ): Promise<JobCreateResponse> {
-  const body = new FormData();
-  body.append("video", video);
-  body.append("source_lang", sourceLang);
-  body.append("target_lang", targetLang);
-  const resp = await fetch(`${BASE}/jobs`, { method: "POST", body });
-  return handleResponse(resp);
+  const { onProgress, signal } = options ?? {};
+
+  return new Promise<JobCreateResponse>((resolve, reject) => {
+    // Fail fast on an already-aborted signal — don't even construct the XHR.
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const body = new FormData();
+    body.append("video", video);
+    body.append("source_lang", sourceLang);
+    body.append("target_lang", targetLang);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/jobs`);
+    // DO NOT set Content-Type — the browser injects the multipart boundary
+    // when the body is a FormData instance. Same contract as `fetch`.
+
+    // --- progress wiring --------------------------------------------------
+    if (onProgress) {
+      const startedAt = Date.now();
+      xhr.upload.addEventListener("progress", (ev) => {
+        const loaded = ev.loaded;
+        const total = ev.total;
+        const percent = total > 0 ? Math.round((loaded / total) * 100) : 0;
+        const elapsedMs = Date.now() - startedAt;
+        // Only compute throughput once we have >=1s of signal AND we know
+        // the total size; otherwise we'd either divide by a tiny number or
+        // pretend we know how much is left when we don't.
+        let bytesPerSec: number | null = null;
+        let etaSeconds: number | null = null;
+        if (elapsedMs >= 1000 && total > 0) {
+          bytesPerSec = Math.round(loaded / (elapsedMs / 1000));
+          if (bytesPerSec > 0) {
+            etaSeconds = Math.round((total - loaded) / bytesPerSec);
+          }
+        }
+        onProgress({ loaded, total, percent, bytesPerSec, etaSeconds });
+      });
+    }
+
+    // --- abort wiring -----------------------------------------------------
+    const onAbortSignal = () => xhr.abort();
+    if (signal) {
+      signal.addEventListener("abort", onAbortSignal);
+    }
+    const cleanupSignal = () => {
+      if (signal) signal.removeEventListener("abort", onAbortSignal);
+    };
+
+    // --- terminal handlers ------------------------------------------------
+    xhr.onload = () => {
+      cleanupSignal();
+      let parsed: unknown = null;
+      const text = xhr.responseText ?? "";
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        // Server emitted non-JSON — fall back to the raw text so ApiError
+        // still carries something useful.
+        parsed = text;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsed as JobCreateResponse);
+        return;
+      }
+      reject(new ApiError(xhr.status, unwrapFastapiDetail(parsed)));
+    };
+
+    xhr.onerror = () => {
+      cleanupSignal();
+      reject(new ApiError(0, null, "Network error"));
+    };
+    xhr.ontimeout = () => {
+      cleanupSignal();
+      reject(new ApiError(0, null, "Network error"));
+    };
+    xhr.onabort = () => {
+      cleanupSignal();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+
+    xhr.send(body);
+  });
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {

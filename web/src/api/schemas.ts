@@ -105,3 +105,19 @@ export interface ConcurrentJobErrorDetail {
   error: "concurrent_job";
   active_job_id: string | null;
 }
+
+/**
+ * Snapshot of a file-upload progress event. Derived client-side from
+ * XMLHttpRequest's `progress` event; not a server payload.
+ *
+ * bytesPerSec and etaSeconds are null until at least ~1 second of
+ * elapsed time has accumulated (per plan R2: guard divide-by-zero on
+ * browsers that coalesce progress events).
+ */
+export interface UploadProgress {
+  loaded: number; // bytes uploaded so far
+  total: number; // total bytes (from XHR progress event; 0 if unknown)
+  percent: number; // 0..100; 0 if total is 0
+  bytesPerSec: number | null;
+  etaSeconds: number | null;
+}
