@@ -189,6 +189,27 @@ describe("<UploadForm>", () => {
     await screen.findByRole("heading", { name: /file too large/i });
   });
 
+  it("shows an error banner and keeps submit disabled when getLanguages rejects", async () => {
+    vi.mocked(getLanguages).mockRejectedValueOnce(
+      new Error("network down"),
+    );
+
+    render(<UploadForm onJobCreated={vi.fn()} />);
+
+    // The catch branch sets a kind="other" error; the description text
+    // mentions the language list specifically so the user knows the form
+    // couldn't be initialized.
+    const description = await screen.findByText(
+      /could not load language list: network down/i,
+    );
+    expect(description).toBeInTheDocument();
+
+    // Submit stays disabled — both language selects are empty-disabled
+    // because the options array is [], and no file is picked either.
+    const submit = screen.getByRole("button", { name: /start translation/i });
+    expect(submit).toBeDisabled();
+  });
+
   it("shows a language-error alert on 400", async () => {
     vi.mocked(createJob).mockRejectedValueOnce(
       new ApiError(400, "unsupported source_lang: xx"),
