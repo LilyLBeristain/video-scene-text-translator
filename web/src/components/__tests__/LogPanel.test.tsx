@@ -1,41 +1,90 @@
 /**
- * Tests for <LogPanel>. We assert:
- *   1. messages render in the given order, one line per entry.
- *   2. on a log append, the scroll container's `scrollTop` follows to
- *      `scrollHeight` (auto-scroll contract).
+ * Tests for <LogPanel>. Covers the mockup-vocabulary rewrite:
+ *   - empty state copy
+ *   - each line renders [HH:MM:SS] + severity chip (INFO/WARN/ERROR) + body
+ *   - stage-separator regex bolds "=== Stage N ===" lines (loose pattern)
+ *   - severity classnames reference the right token var
+ *   - header "N lines" pill
+ *   - plain auto-scroll on log growth (no escape hatch)
+ *   - S3 silence hint only appears when currentStage==="s3" && isRunning===true
+ *   - large log arrays don't crash rendering
  *
- * For #2 jsdom doesn't perform real layout, so scrollHeight stays 0. We
- * sidestep that by mocking scrollHeight on the element under test and
- * observing that the component *writes* scrollTop to it.
+ * jsdom doesn't lay out, so for the auto-scroll assertion we stub
+ * `scrollHeight` via Object.defineProperty and observe that the component
+ * writes it into `scrollTop`.
  */
 
 import { describe, expect, it } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 
 import { LogPanel } from "../LogPanel";
 
 describe("<LogPanel>", () => {
-  it("renders all messages in order", () => {
+  it("shows the empty-state hint when logs is empty", () => {
+    const { getByText } = render(<LogPanel logs={[]} />);
+    expect(getByText(/waiting for pipeline output/i)).toBeInTheDocument();
+  });
+
+  it("renders each log line with timestamp, severity chip, and body", () => {
     const logs = [
       { level: "info" as const, message: "alpha", ts: 1 },
       { level: "warning" as const, message: "beta", ts: 2 },
       { level: "error" as const, message: "gamma", ts: 3 },
     ];
 
-    const { container } = render(<LogPanel logs={logs} />);
+    const { container, getByText } = render(<LogPanel logs={logs} />);
 
     const lines = container.querySelectorAll("[data-testid='log-line']");
     expect(lines).toHaveLength(3);
     expect(lines[0]!.textContent).toContain("alpha");
     expect(lines[1]!.textContent).toContain("beta");
     expect(lines[2]!.textContent).toContain("gamma");
-    // Ordering preserved.
-    const indexOfAlpha = container.innerHTML.indexOf("alpha");
-    const indexOfGamma = container.innerHTML.indexOf("gamma");
-    expect(indexOfAlpha).toBeLessThan(indexOfGamma);
+
+    // Severity chips show the truncated labels.
+    expect(getByText("INFO")).toBeInTheDocument();
+    expect(getByText("WARN")).toBeInTheDocument();
+    expect(getByText("ERROR")).toBeInTheDocument();
   });
 
-  it("auto-scrolls to the bottom when logs grow", () => {
+  it("bolds '=== Stage N ===' lines via the .hdr class", () => {
+    const logs = [
+      { level: "info" as const, message: "=== Stage 3 ===", ts: 1 },
+      { level: "info" as const, message: "==== Stage 10 ====", ts: 2 },
+      { level: "info" as const, message: "plain body", ts: 3 },
+    ];
+
+    const { container } = render(<LogPanel logs={logs} />);
+    const lines = container.querySelectorAll(
+      "[data-testid='log-line']",
+    ) as NodeListOf<HTMLElement>;
+
+    expect(lines[0]!.className).toContain("hdr");
+    expect(lines[1]!.className).toContain("hdr");
+    expect(lines[2]!.className).not.toContain("hdr");
+  });
+
+  it("paints the error severity chip with the --err color token", () => {
+    const logs = [{ level: "error" as const, message: "boom", ts: 1 }];
+    const { container } = render(<LogPanel logs={logs} />);
+    const line = container.querySelector(
+      "[data-testid='log-line']",
+    ) as HTMLElement;
+    // The chip carries the color class; we look for the token substring so
+    // we don't couple to the full Tailwind utility string.
+    expect(line.innerHTML).toContain("var(--err)");
+  });
+
+  it("shows the log-count pill in the header", () => {
+    const logs = Array.from({ length: 7 }, (_, i) => ({
+      level: "info" as const,
+      message: `line ${i}`,
+      ts: i,
+    }));
+    const { getByText } = render(<LogPanel logs={logs} />);
+    expect(getByText("7 lines")).toBeInTheDocument();
+  });
+
+  it("auto-scrolls to the bottom whenever logs grow", async () => {
     const first = [{ level: "info" as const, message: "first", ts: 1 }];
     const { container, rerender } = render(<LogPanel logs={first} />);
 
@@ -44,8 +93,8 @@ describe("<LogPanel>", () => {
     ) as HTMLElement;
     expect(panel).not.toBeNull();
 
-    // Fake a filled-in scroll area since jsdom doesn't lay out. The component
-    // should read scrollHeight on effect and assign it to scrollTop.
+    // jsdom doesn't compute layout; fake scrollHeight so the effect has
+    // something to assign to scrollTop.
     Object.defineProperty(panel, "scrollHeight", {
       configurable: true,
       value: 1234,
@@ -60,85 +109,12 @@ describe("<LogPanel>", () => {
       />,
     );
 
-    expect(panel.scrollTop).toBe(1234);
-  });
+    await waitFor(() => expect(panel.scrollTop).toBe(1234));
 
-  it("does NOT auto-scroll when user has scrolled up", () => {
-    // Start with a baseline log + simulate "filled panel" geometry.
-    const first = [{ level: "info" as const, message: "first", ts: 1 }];
-    const { container, rerender } = render(<LogPanel logs={first} />);
-    const panel = container.querySelector(
-      "[data-testid='log-panel']",
-    ) as HTMLElement;
-
-    // Simulate: scrollHeight grew to 1000, clientHeight is 192 (the h-48
-    // class maps to 12rem = 192px at default font-size). User scrolled
-    // up — scrollTop is now well below the bottom.
+    // Another append → should auto-follow unconditionally (no escape hatch).
     Object.defineProperty(panel, "scrollHeight", {
       configurable: true,
-      value: 1000,
-    });
-    Object.defineProperty(panel, "clientHeight", {
-      configurable: true,
-      value: 192,
-    });
-    panel.scrollTop = 100; // far from bottom (1000 - 100 - 192 = 708 px off)
-
-    // Fire a scroll event so the component updates its isAtBottom ref.
-    fireEvent.scroll(panel);
-
-    // Now a new log arrives. scrollTop must NOT jump to scrollHeight.
-    rerender(
-      <LogPanel
-        logs={[
-          ...first,
-          { level: "info" as const, message: "second", ts: 2 },
-        ]}
-      />,
-    );
-
-    expect(panel.scrollTop).toBe(100);
-  });
-
-  it("resumes auto-scroll once the user returns to the bottom", () => {
-    const first = [{ level: "info" as const, message: "first", ts: 1 }];
-    const { container, rerender } = render(<LogPanel logs={first} />);
-    const panel = container.querySelector(
-      "[data-testid='log-panel']",
-    ) as HTMLElement;
-
-    Object.defineProperty(panel, "scrollHeight", {
-      configurable: true,
-      value: 1000,
-    });
-    Object.defineProperty(panel, "clientHeight", {
-      configurable: true,
-      value: 192,
-    });
-
-    // Step 1: user scrolls up.
-    panel.scrollTop = 100;
-    fireEvent.scroll(panel);
-
-    rerender(
-      <LogPanel
-        logs={[
-          ...first,
-          { level: "info" as const, message: "second", ts: 2 },
-        ]}
-      />,
-    );
-    expect(panel.scrollTop).toBe(100); // sanity — no jank
-
-    // Step 2: user scrolls back to the bottom.
-    // With scrollHeight=1000 and clientHeight=192, bottom = 1000-192 = 808.
-    panel.scrollTop = 808;
-    fireEvent.scroll(panel);
-
-    // Step 3: a new log arrives. scrollTop should auto-follow.
-    Object.defineProperty(panel, "scrollHeight", {
-      configurable: true,
-      value: 1050,
+      value: 2468,
     });
     rerender(
       <LogPanel
@@ -149,7 +125,37 @@ describe("<LogPanel>", () => {
         ]}
       />,
     );
+    await waitFor(() => expect(panel.scrollTop).toBe(2468));
+  });
 
-    expect(panel.scrollTop).toBe(1050);
+  it("shows the S3 silence hint only when currentStage='s3' and isRunning", () => {
+    const logs = [{ level: "info" as const, message: "x", ts: 1 }];
+
+    const { queryByTestId, rerender } = render(
+      <LogPanel logs={logs} currentStage="s3" isRunning={true} />,
+    );
+    expect(queryByTestId("s3-hint")).not.toBeNull();
+
+    rerender(<LogPanel logs={logs} currentStage="s3" isRunning={false} />);
+    expect(queryByTestId("s3-hint")).toBeNull();
+
+    rerender(<LogPanel logs={logs} currentStage="s4" isRunning={true} />);
+    expect(queryByTestId("s3-hint")).toBeNull();
+
+    // Back-compat: both props omitted → hint absent.
+    rerender(<LogPanel logs={logs} />);
+    expect(queryByTestId("s3-hint")).toBeNull();
+  });
+
+  it("renders a large number of log lines without crashing", () => {
+    const logs = Array.from({ length: 200 }, (_, i) => ({
+      level: "info" as const,
+      message: `line ${i}`,
+      ts: i,
+    }));
+    const { container } = render(<LogPanel logs={logs} />);
+    expect(
+      container.querySelectorAll("[data-testid='log-line']"),
+    ).toHaveLength(200);
   });
 });
