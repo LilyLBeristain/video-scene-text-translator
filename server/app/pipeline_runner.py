@@ -36,6 +36,7 @@ Design (plan.md D10, D11, D13, R6):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import subprocess
 import sys
@@ -160,28 +161,34 @@ def _transcode_to_browser_safe(output_path: Path) -> None:
         str(tmp_path),
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "ffmpeg not found on PATH; required for browser-safe MP4 "
-            "transcode (plan.md R3). Install via `apt install ffmpeg`."
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = (
-            exc.stderr.decode("utf-8", errors="replace")
-            if exc.stderr else ""
-        )
-        # Clean up the half-written tmp file before raising so the next
-        # attempt starts from a clean slate.
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise RuntimeError(
-            f"ffmpeg transcode failed (rc={exc.returncode}): {stderr}"
-        ) from exc
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "ffmpeg not found on PATH; required for browser-safe MP4 "
+                "transcode (plan.md R3). Install via `apt install ffmpeg`."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (
+                exc.stderr.decode("utf-8", errors="replace")
+                if exc.stderr else ""
+            )
+            raise RuntimeError(
+                f"ffmpeg transcode failed (rc={exc.returncode}): {stderr}"
+            ) from exc
 
-    # Atomic swap — `Path.replace` is atomic on POSIX when src and dst are
-    # on the same filesystem, which they are by construction (sibling).
-    tmp_path.replace(output_path)
+        # Atomic swap — `Path.replace` is atomic on POSIX when src and dst
+        # are on the same filesystem (they are, by construction: siblings).
+        # After this, tmp_path no longer exists.
+        tmp_path.replace(output_path)
+    finally:
+        # Any failure path (ffmpeg missing, ffmpeg errored, unexpected
+        # PermissionError/OSError, etc.) must not leak the half-written
+        # tmp_path. If the swap succeeded, tmp_path is already gone and
+        # this is a no-op.
+        if tmp_path.exists():
+            with contextlib.suppress(OSError):
+                tmp_path.unlink()
 
 
 def _resolve_checkpoint_path(raw: str | None) -> str | None:
@@ -221,6 +228,9 @@ def _build_config(
     # Lazy imports — see module docstring for rationale (R6 + light server).
     from src.config import PipelineConfig  # type: ignore[import-not-found]
 
+    # NOTE: relies on `from_yaml` returning a fresh object per call. If that
+    # changes (e.g. YAML parse cached), the mutations below would race across
+    # concurrent jobs. JobManager is single-worker today, so this is safe.
     config = PipelineConfig.from_yaml(str(_ADV_YAML))
     config.input_video = str(input_path)
     config.output_video = str(output_path)

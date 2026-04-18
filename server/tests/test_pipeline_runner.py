@@ -527,6 +527,41 @@ def test_transcode_raises_runtime_error_when_ffmpeg_fails(
         _transcode_to_browser_safe(src)
 
 
+def test_transcode_cleans_tmp_on_unexpected_exception(
+    tmp_path: Path, monkeypatch
+):
+    # Arrange — subprocess.run raises an exception NOT caught by either of
+    # the named except branches (FileNotFoundError / CalledProcessError).
+    # A PermissionError simulates a transient OS failure. The try/finally
+    # must clean up the .browser.mp4 temp file regardless.
+    src = tmp_path / "out.mp4"
+    src.write_bytes(b"FAKE_FMP4_BYTES")
+    original_bytes = src.read_bytes()
+
+    def fake_run(cmd, **kwargs):
+        # Create the tmp output (so ffmpeg "started" writing) and THEN fail
+        # with a non-ffmpeg-specific error. Tests the finally cleanup path.
+        tmp_out = Path(cmd[-1])
+        tmp_out.write_bytes(b"partial")
+        raise PermissionError("no")
+
+    import server.app.pipeline_runner as runner_mod
+    monkeypatch.setattr(runner_mod.subprocess, "run", fake_run)
+
+    # Act + Assert — unexpected exception propagates (not wrapped).
+    with pytest.raises(PermissionError):
+        _transcode_to_browser_safe(src)
+
+    # tmp_path must be cleaned up by the finally block.
+    tmp_path_artifact = src.with_suffix(".browser.mp4")
+    assert not tmp_path_artifact.exists(), (
+        f"tmp file {tmp_path_artifact} survived an unexpected exception"
+    )
+    # Original file untouched — the atomic swap never happened.
+    assert src.exists()
+    assert src.read_bytes() == original_bytes
+
+
 def test_run_pipeline_transcodes_output_after_pipeline_run(
     tmp_path: Path, monkeypatch
 ):
