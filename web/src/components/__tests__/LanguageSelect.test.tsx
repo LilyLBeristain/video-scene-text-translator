@@ -1,19 +1,22 @@
 /**
- * Tests for <LanguageSelect>. Radix Select renders its listbox into a portal
- * and requires pointer events that jsdom stubs poorly; we use userEvent to
- * click the trigger and the option, which is the same path a real user takes.
+ * Tests for <LanguageSelect>. Step 6 rewrites the component from a Radix
+ * <Select> to a hand-rolled native <select> styled per `.lang-select` in the
+ * mockup. That lets us:
+ *   - drop the Radix pointer-capture / scrollIntoView jsdom stubs,
+ *   - drive the control with `fireEvent.change` (one event, no popper),
+ *   - rely on the browser's built-in keyboard + a11y semantics.
  *
- * Scope stays deliberately narrow:
- *   1. label renders
- *   2. options render after opening the listbox
- *   3. onChange fires with the selected code
- *   4. disabled prop disables the trigger
- * We don't re-test Radix's own behaviour (keyboard nav, type-ahead, …).
+ * Scope (narrow, behaviour-level):
+ *   1. label renders and wires to the <select> via htmlFor
+ *   2. all languages render as options, one per code
+ *   3. controlled `value` drives the <select>'s current choice
+ *   4. onChange fires with the new code when the user picks a different option
+ *   5. `disabled` → select is disabled
+ *   6. `locked` → select is disabled AND a lock indicator is visible
  */
 
-import { describe, expect, it, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { LanguageSelect } from "../LanguageSelect";
 import type { Language } from "@/api/schemas";
@@ -24,13 +27,14 @@ const LANGUAGES: Language[] = [
   { code: "fr", label: "French" },
 ];
 
-// Radix Select uses pointer-events APIs that jsdom doesn't implement.
-// Stub `hasPointerCapture` and `scrollIntoView` before any test mounts.
-beforeAll(() => {
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.releasePointerCapture = () => undefined;
-  Element.prototype.scrollIntoView = () => undefined;
-});
+function getSelect(): HTMLSelectElement {
+  // Native <select> has an implicit role of "combobox" in Testing Library's
+  // ARIA mapping, but we match via the accessible name (the label) so the
+  // test doubles as a check that htmlFor is wired up correctly.
+  return screen.getByRole("combobox", {
+    name: /source language/i,
+  }) as HTMLSelectElement;
+}
 
 describe("<LanguageSelect>", () => {
   it("renders the provided label", () => {
@@ -45,8 +49,7 @@ describe("<LanguageSelect>", () => {
     expect(screen.getByText("Source language")).toBeInTheDocument();
   });
 
-  it("shows all language options after opening the listbox", async () => {
-    const user = userEvent.setup();
+  it("renders one <option> per language", () => {
     render(
       <LanguageSelect
         label="Source language"
@@ -55,25 +58,29 @@ describe("<LanguageSelect>", () => {
         languages={LANGUAGES}
       />,
     );
-
-    await user.click(screen.getByRole("combobox"));
-
-    // Radix portals options to document.body; getByRole("option", ...) still
-    // finds them via the shared screen query.
-    expect(
-      screen.getByRole("option", { name: "English" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "Spanish" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "French" }),
-    ).toBeInTheDocument();
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(LANGUAGES.length);
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([
+      "en",
+      "es",
+      "fr",
+    ]);
   });
 
-  it("fires onChange with the new code when a different option is picked", async () => {
+  it("reflects the controlled `value` prop on the <select>", () => {
+    render(
+      <LanguageSelect
+        label="Source language"
+        value="es"
+        onChange={vi.fn()}
+        languages={LANGUAGES}
+      />,
+    );
+    expect(getSelect().value).toBe("es");
+  });
+
+  it("fires onChange with the new code when a different option is picked", () => {
     const onChange = vi.fn();
-    const user = userEvent.setup();
     render(
       <LanguageSelect
         label="Source language"
@@ -83,13 +90,12 @@ describe("<LanguageSelect>", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox"));
-    await user.click(screen.getByRole("option", { name: "Spanish" }));
+    fireEvent.change(getSelect(), { target: { value: "fr" } });
 
-    expect(onChange).toHaveBeenCalledWith("es");
+    expect(onChange).toHaveBeenCalledWith("fr");
   });
 
-  it("disables the trigger when `disabled` is true", () => {
+  it("disables the <select> when `disabled` is true", () => {
     render(
       <LanguageSelect
         label="Source language"
@@ -99,6 +105,20 @@ describe("<LanguageSelect>", () => {
         disabled
       />,
     );
-    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(getSelect()).toBeDisabled();
+  });
+
+  it("shows a lock indicator and disables the <select> when `locked` is true", () => {
+    render(
+      <LanguageSelect
+        label="Source language"
+        value="en"
+        onChange={vi.fn()}
+        languages={LANGUAGES}
+        locked
+      />,
+    );
+    expect(getSelect()).toBeDisabled();
+    expect(screen.getByTestId("lang-select-lock")).toBeInTheDocument();
   });
 });

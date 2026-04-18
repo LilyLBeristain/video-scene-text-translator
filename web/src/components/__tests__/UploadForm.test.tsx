@@ -7,8 +7,8 @@
  * since the two LanguageSelects have distinct labels.
  */
 
-import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // Hoisted mock: every test in this file gets the same mocked client.
@@ -35,11 +35,9 @@ const LANGUAGES: Language[] = [
   { code: "ko", label: "Korean" },
 ];
 
-beforeAll(() => {
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.releasePointerCapture = () => undefined;
-  Element.prototype.scrollIntoView = () => undefined;
-});
+// Note: the Radix pointer-capture / scrollIntoView stubs used in the previous
+// version of this file were only needed for the Radix-backed <LanguageSelect>.
+// Step 6 swapped that for a native <select>, so the stubs are gone too.
 
 beforeEach(() => {
   vi.mocked(getLanguages).mockReset();
@@ -56,31 +54,29 @@ async function pickFile(user: ReturnType<typeof userEvent.setup>) {
   await user.upload(input, makeFile());
 }
 
-async function pickLanguage(
-  user: ReturnType<typeof userEvent.setup>,
+function pickLanguage(
   labelText: string | RegExp,
-  optionLabel: string,
+  optionValue: string,
 ) {
-  const trigger = screen.getByRole("combobox", { name: labelText });
-  await user.click(trigger);
-  await user.click(screen.getByRole("option", { name: optionLabel }));
+  // Native <select>: one change event moves the controlled value. We use
+  // `fireEvent.change` rather than `user.selectOptions` because the latter
+  // requires `findByRole` in some environments and adds no signal here.
+  const select = screen.getByRole("combobox", { name: labelText });
+  fireEvent.change(select, { target: { value: optionValue } });
 }
 
 describe("<UploadForm>", () => {
   it("calls getLanguages on mount and renders the 7 codes as options", async () => {
-    const user = userEvent.setup();
     render(<UploadForm onJobCreated={vi.fn()} />);
 
     await waitFor(() => {
       expect(vi.mocked(getLanguages)).toHaveBeenCalledTimes(1);
     });
 
-    // Open the first combobox (source lang) and count its options.
-    await user.click(
-      screen.getByRole("combobox", { name: /source language/i }),
-    );
+    // Native <select> renders all <option>s as children, so we can count them
+    // directly without opening any popper. Two selects × N options each.
     const options = await screen.findAllByRole("option");
-    expect(options).toHaveLength(LANGUAGES.length);
+    expect(options).toHaveLength(LANGUAGES.length * 2);
   });
 
   it("submit button stays disabled until a file is picked", async () => {
@@ -103,7 +99,7 @@ describe("<UploadForm>", () => {
 
     await pickFile(user);
     // Change target to English (matches default source).
-    await pickLanguage(user, /target language/i, "English");
+    pickLanguage(/target language/i, "en");
 
     const submit = screen.getByRole("button", { name: /start translation/i });
     expect(submit).toBeDisabled();
