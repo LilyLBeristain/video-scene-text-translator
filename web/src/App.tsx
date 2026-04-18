@@ -730,6 +730,41 @@ function ActiveView({
 }: ActiveViewProps): JSX.Element {
   const { state: streamState } = useJobStream(state.jobId);
 
+  // `isDeleting` + `deleteError` live here (not in the submit slot)
+  // because the error surface renders in the RIGHT column below the
+  // terminal progress/result/failure surface. Keeping both pieces of
+  // state at the shared parent avoids a second source of truth.
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleReset = useCallback(() => {
+    // On reset, wipe any lingering delete error so it doesn't shadow
+    // the fresh idle view.
+    setDeleteError(null);
+    onReset();
+  }, [onReset]);
+
+  const handleDelete = useCallback(async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteJob(state.jobId);
+      onReset();
+    } catch (err) {
+      // Terminal jobs shouldn't 409 in normal flow, but the server MAY
+      // still refuse the delete (e.g. the job vanished, or a race
+      // against a different tab). Surface it instead of silently
+      // eating the click.
+      const detail =
+        err instanceof ApiError && typeof err.detail === "string"
+          ? err.detail
+          : (err as Error)?.message ?? "unknown error";
+      setDeleteError(`Could not delete job: ${detail}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [state.jobId, onReset]);
+
   return (
     <AppShell
       left={
@@ -738,14 +773,21 @@ function ActiveView({
           languagePairSlot={renderActiveLanguagePairSlot(state, languages)}
           submitSlot={
             <ActiveSubmitSlot
-              jobId={state.jobId}
               streamState={streamState}
-              onReset={onReset}
+              onReset={handleReset}
+              onDelete={handleDelete}
+              isDeleting={isDeleting}
             />
           }
         />
       }
-      right={<ActiveRightColumn jobId={state.jobId} streamState={streamState} />}
+      right={
+        <ActiveRightColumn
+          jobId={state.jobId}
+          streamState={streamState}
+          deleteError={deleteError}
+        />
+      }
     />
   );
 }
@@ -783,40 +825,27 @@ function renderActiveLanguagePairSlot(
 }
 
 interface ActiveSubmitSlotProps {
-  jobId: string;
   streamState: JobStreamState;
   onReset: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
 }
 
 function ActiveSubmitSlot({
-  jobId,
   streamState,
   onReset,
+  onDelete,
+  isDeleting,
 }: ActiveSubmitSlotProps): JSX.Element {
-  const [isDeleting, setIsDeleting] = useState(false);
-
   const terminal =
     streamState.status === "succeeded" || streamState.status === "failed";
-
-  const handleDelete = useCallback(async () => {
-    setIsDeleting(true);
-    try {
-      await deleteJob(jobId);
-      onReset();
-    } catch {
-      // Terminal jobs shouldn't 409; we don't surface the failure here.
-      // Step 15 can wire a better affordance if this becomes visible.
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [jobId, onReset]);
 
   if (terminal) {
     return (
       <SubmitBar
         kind="terminal"
         onReset={onReset}
-        onDelete={handleDelete}
+        onDelete={onDelete}
         isDeleting={isDeleting}
       />
     );
@@ -827,11 +856,19 @@ function ActiveSubmitSlot({
 interface ActiveRightColumnProps {
   jobId: string;
   streamState: JobStreamState;
+  /**
+   * Error message from the most recent `deleteJob` attempt. Rendered as
+   * a destructive inline Alert below the terminal surface so a silent
+   * 409 doesn't leave the user wondering why clicking "delete" did
+   * nothing. `null` when there has been no failure (or after a reset).
+   */
+  deleteError: string | null;
 }
 
 function ActiveRightColumn({
   jobId,
   streamState,
+  deleteError,
 }: ActiveRightColumnProps): JSX.Element {
   const kind: StatusBandKind =
     streamState.status === "connecting"
@@ -843,10 +880,12 @@ function ActiveRightColumn({
           : "failed";
 
   const isRunning = streamState.status === "running";
+  // `streamState.failedStage` is frozen by the hook in the same reducer
+  // tick that flips status to "failed" — `currentStage` is null by that
+  // point, so reading it here would always resolve to null and the
+  // fail-tile styling would never activate.
   const failedStage =
-    streamState.status === "failed"
-      ? (streamState.currentStage ?? null)
-      : null;
+    streamState.status === "failed" ? streamState.failedStage : null;
 
   return (
     <>
@@ -890,6 +929,16 @@ function ActiveRightColumn({
               traceback={streamState.error.traceback ?? null}
             />
           </>
+        )}
+        {/*
+         * Inline delete-error alert. Rendered below whatever terminal
+         * surface is present (ResultPanel, FailureCard, or nothing) so a
+         * failed `deleteJob` call never disappears silently.
+         */}
+        {deleteError && (
+          <Alert variant="destructive" data-testid="delete-error">
+            <AlertDescription>{deleteError}</AlertDescription>
+          </Alert>
         )}
       </div>
     </>

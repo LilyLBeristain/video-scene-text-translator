@@ -19,8 +19,11 @@
  *   - <section aria-labelledby> wires the <h2> as the card's label.
  *   - The red label strip is decorative — `aria-hidden` because it
  *     repeats info already covered by the heading.
- *   - The Copy-error button exposes its state change via `aria-live` so
- *     SR users hear the "Copied" confirmation.
+ *   - The "Copied" confirmation is announced via a sibling visually-
+ *     hidden `<span aria-live="polite">` rather than `aria-live` on the
+ *     button itself. Major SR+browser combos (JAWS, NVDA) ignore
+ *     aria-live on interactive elements; putting it on a static span
+ *     they always treat as a live region is the reliable path.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -121,13 +124,21 @@ export function FailureCard({
           </details>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2">
+          {/*
+           * Always-mounted live region. Empty when idle, populated on
+           * click; SRs announce the change. Must be a sibling of the
+           * button (not its child) so the live-region semantics live
+           * on a static element.
+           */}
+          <span className="sr-only" aria-live="polite">
+            {copied ? "Copied error to clipboard" : ""}
+          </span>
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={handleCopy}
-            aria-live="polite"
           >
             {copied ? "Copied" : "Copy error"}
           </Button>

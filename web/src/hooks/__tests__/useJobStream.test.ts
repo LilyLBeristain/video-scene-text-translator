@@ -188,6 +188,69 @@ describe("useJobStream", () => {
     expect(mockClose).toHaveBeenCalled();
   });
 
+  it("captures failedStage from the last active stage on error", async () => {
+    // Regression: previously `currentStage` was cleared in the same setState
+    // as `status: failed`, so <StageProgress>'s fail-tile styling never
+    // activated. We now freeze the last active stage into `failedStage`
+    // before clearing `currentStage`.
+    const { result } = renderHook(() => useJobStream("job-1"));
+    await waitFor(() => expect(capturedOptions).not.toBeNull());
+
+    act(() => {
+      capturedOptions!.onEvent({ type: "stage_start", stage: "s3", ts: 1 });
+    });
+    act(() => {
+      capturedOptions!.onEvent({
+        type: "error",
+        message: "boom",
+        ts: 2,
+      });
+    });
+
+    expect(result.current.state.status).toBe("failed");
+    expect(result.current.state.currentStage).toBeNull();
+    expect(result.current.state.failedStage).toBe("s3");
+  });
+
+  it("captures failedStage from applyStatusSync on a failed job", async () => {
+    // SSE reconnect lands directly on a failed status — no SSE error event
+    // arrived locally, so failedStage must fall back to status.current_stage.
+    const { result } = renderHook(() => useJobStream("job-1"));
+    await waitFor(() => expect(capturedOptions).not.toBeNull());
+
+    act(() => {
+      capturedOptions!.onStatusSync?.(
+        baseStatus({
+          status: "failed",
+          current_stage: "s4",
+          error: "dead",
+        }),
+      );
+    });
+
+    expect(result.current.state.status).toBe("failed");
+    expect(result.current.state.currentStage).toBeNull();
+    expect(result.current.state.failedStage).toBe("s4");
+  });
+
+  it("seed-fetch on a failed job populates failedStage from status.current_stage", async () => {
+    vi.mocked(getJobStatus).mockResolvedValueOnce(
+      baseStatus({
+        status: "failed",
+        current_stage: "s2",
+        error: "ded",
+      }),
+    );
+
+    const { result } = renderHook(() => useJobStream("job-1"));
+
+    await waitFor(() => {
+      expect(result.current.state.status).toBe("failed");
+    });
+
+    expect(result.current.state.failedStage).toBe("s2");
+  });
+
   it("appends log events in order and caps at 500", async () => {
     const { result } = renderHook(() => useJobStream("job-1"));
     await waitFor(() => expect(capturedOptions).not.toBeNull());

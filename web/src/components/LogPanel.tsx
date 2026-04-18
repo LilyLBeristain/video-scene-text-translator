@@ -116,9 +116,17 @@ export function LogPanel({ logs, currentStage, isRunning }: LogPanelProps) {
           <>
             {logs.map((log, i) => {
               const isHeader = STAGE_HEADER_RE.test(log.message);
+              // Composite key: `log.ts` provides stability across normal
+              // appends (the server's `time.time()` source is monotonic
+              // per-process); the index disambiguates same-second
+              // collisions. Imperfect — when the hook caps at 500 and
+              // drops the head, indices shift and React re-keys the
+              // list. Accepted as a once-per-500-lines churn; the
+              // cleaner fix (a monotonic seq counter added on append)
+              // requires hook-level changes we're deferring.
               return (
                 <div
-                  key={i}
+                  key={`${log.ts}-${i}`}
                   data-testid="log-line"
                   className={cn(
                     "whitespace-pre-wrap text-foreground",

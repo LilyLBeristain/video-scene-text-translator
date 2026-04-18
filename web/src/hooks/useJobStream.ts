@@ -66,6 +66,19 @@ export interface JobStreamState {
   outputUrl: string | null;
   currentStage: Stage | null;
   /**
+   * Stage that was active when the pipeline transitioned into `failed`.
+   *
+   * Captured in the same reducer tick as `status: "failed"` (from both the
+   * SSE `error` event path and the `applyStatusSync` failed branch), because
+   * `currentStage` is cleared in that same commit — by the time
+   * <StageProgress> renders, `currentStage` is already null, so it cannot
+   * carry the fail-tile signal. On seed-fetch against an already-failed job
+   * the value comes from `status.current_stage` directly.
+   *
+   * `null` whenever the job is not in a terminal failed state.
+   */
+  failedStage: Stage | null;
+  /**
    * Elapsed time spent in the currently-active stage, in milliseconds,
    * floored to whole seconds. 0 when no stage is active.
    *
@@ -107,6 +120,7 @@ function initialState(): JobStreamState {
     error: null,
     outputUrl: null,
     currentStage: null,
+    failedStage: null,
     activeStageElapsedMs: 0,
   };
 }
@@ -286,6 +300,12 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
                 message: ev.message,
                 traceback: ev.traceback ?? null,
               },
+              // Capture the stage that was running BEFORE we clear
+              // currentStage — otherwise <StageProgress> sees null and
+              // can't paint the fail tile. Fall back to an existing
+              // failedStage if one is already recorded (defensive against
+              // out-of-order events).
+              failedStage: prev.currentStage ?? prev.failedStage,
               currentStage: null,
               activeStageElapsedMs: 0,
             };
@@ -349,6 +369,15 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
               message: status.error ?? "Pipeline failed",
               traceback: null,
             },
+            // Prefer the locally-observed active stage; fall back to any
+            // already-captured failedStage, then to the server snapshot's
+            // current_stage (which is what /status returns for a failed
+            // job on reconnect when we never saw the SSE error event).
+            failedStage:
+              prev.currentStage ??
+              prev.failedStage ??
+              status.current_stage ??
+              null,
             currentStage: null,
             activeStageElapsedMs: 0,
           };
@@ -434,6 +463,9 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
               },
               stages,
               currentStage: null,
+              // Seed path: we never observed an active stage locally, so
+              // the only source of truth is the server snapshot.
+              failedStage: status.current_stage ?? null,
             };
           }
           // "queued" on the server has no direct mapping in our local
