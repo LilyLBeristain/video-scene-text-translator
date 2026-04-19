@@ -71,6 +71,7 @@ import { FailureCard } from "@/components/right/FailureCard";
 import { IdlePlaceholder } from "@/components/right/IdlePlaceholder";
 import { RejoinCard } from "@/components/right/RejoinCard";
 import { StatusBand, type StatusBandKind } from "@/components/right/StatusBand";
+import { formatBytes } from "@/lib/format";
 import { STAGES } from "@/lib/stages";
 import { UploadProgress } from "@/components/right/UploadProgress";
 
@@ -277,18 +278,6 @@ function initialUiState(): UiState {
 // ---------------------------------------------------------------------------
 // Misc helpers.
 // ---------------------------------------------------------------------------
-
-/**
- * Tiered-unit bytes formatter — the same 6-line helper that UploadProgress
- * inlines. Duplicated twice for now (plan Step 14: "rule of three. When
- * Step 15 polishes, we can extract."). Base-1024 to match MB/GB intuition.
- */
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function errorFromApi(err: unknown): SubmitError {
   if (err instanceof ApiError) {
@@ -981,6 +970,14 @@ function ActiveRightColumn({
           currentStage={streamState.currentStage}
           failedStage={failedStage}
         />
+        {/*
+         * LogPanel only renders while the pipeline is streaming
+         * (connecting or running). Succeeded / failed views drop it by
+         * design — the terminal surfaces (ResultPanel, FailureCard) are
+         * the primary affordance there, and the mockup (04-succeeded,
+         * 05-failed) never shows the log after the run. Revisit if
+         * debug-after-the-fact UX proves necessary.
+         */}
         {(streamState.status === "connecting" || isRunning) && (
           <LogPanel
             logs={streamState.logs}

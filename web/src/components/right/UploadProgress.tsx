@@ -26,19 +26,11 @@
  */
 
 import type { UploadProgress as UploadProgressSnapshot } from "@/api/schemas";
+import { formatBytes } from "@/lib/format";
 
 interface UploadProgressProps {
   progress: UploadProgressSnapshot;
   filename: string;
-}
-
-// Tiered bytes formatter — base-1024 (MiB-style) to match user intuition
-// for download speeds.
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function UploadProgress({

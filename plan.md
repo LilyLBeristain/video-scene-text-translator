@@ -108,6 +108,7 @@ The five file-slot / submit-slot variants (idle, uploading, rejoin, running/succ
 - Human-friendly error title mapping — render raw `error.message` as title, full traceback in `<details>`.
 - localStorage page-reload rejoin — MVP rejoin = 409-on-submit only.
 - "Jump to latest" chip when log is scrolled up — plain auto-scroll for MVP.
+- Post-terminal log view — succeeded + failed phases drop `<LogPanel>` by design; ResultPanel / FailureCard are the primary terminal affordances. Revisit if debug-after-the-fact UX proves necessary.
 
 ## Files to Change
 
