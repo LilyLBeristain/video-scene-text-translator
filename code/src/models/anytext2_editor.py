@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -455,13 +456,14 @@ class AnyText2Editor(BaseTextEditor):
         # so that modify_prompt() regex can find it.
         quoted_text = f'"{target_text}"'
 
-        logger.debug(
+        logger.info(
             "AnyText2 request: text=%r, size=%dx%d, color=%s, steps=%d",
             target_text, w, h, text_color, self.config.anytext2_ddim_steps,
         )
 
         timeout = self.config.server_timeout
 
+        t_submit = time.monotonic()
         job = client.submit(
             img_prompt="Text with some background",
             text_prompt=quoted_text,
@@ -511,7 +513,22 @@ class AnyText2Editor(BaseTextEditor):
             ),
             api_name="/process_1",
         )
-        result = job.result(timeout=timeout)
+        logger.info(
+            "AnyText2 job submitted in %.2fs; waiting up to %ds for result",
+            time.monotonic() - t_submit, timeout,
+        )
+        t_wait = time.monotonic()
+        try:
+            result = job.result(timeout=timeout)
+        except Exception:
+            logger.exception(
+                "AnyText2 job.result() failed after %.1fs (timeout=%ds)",
+                time.monotonic() - t_wait, timeout,
+            )
+            raise
+        logger.info(
+            "AnyText2 result received in %.1fs", time.monotonic() - t_wait,
+        )
 
         return self._parse_result(result)
 
