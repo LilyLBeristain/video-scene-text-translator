@@ -146,6 +146,34 @@ describe("<StageProgress>", () => {
     expect(screen.getByText(/elapsed 00:15/)).toBeInTheDocument();
   });
 
+  it("ignores stale 'done' states at/after currentStage when summing prior elapsed", () => {
+    // Defensive: if an out-of-order event slipped a `done` state onto a
+    // stage at or after `currentStage`, the running-branch sum must NOT
+    // pick it up. Only stages strictly before `currentStage` count.
+    render(
+      <StageProgress
+        stages={{
+          s1: "done",
+          s2: "done",
+          // s3 is the active one, but we defensively mark s4 as `done` too
+          // (simulating a reordered stage_complete that shouldn't affect
+          // the elapsed readout).
+          s3: "active",
+          s4: "done",
+          s5: "pending",
+        }}
+        stageDurations={{ s1: 4200, s2: 6100, s4: 9999 }}
+        activeStageElapsedMs={5000}
+        currentStage="s3"
+      />,
+    );
+
+    // Only s1 (4.2s) + s2 (6.1s) + live tick (5.0s) = 15.3s → "elapsed 00:15".
+    // The stale s4 duration (9.999s) must NOT be included.
+    expect(screen.getByText(/elapsed 00:15/)).toBeInTheDocument();
+    expect(screen.queryByText(/elapsed 00:25/)).toBeNull();
+  });
+
   it("renders 'total MM:SS' when all stages are done", () => {
     render(
       <StageProgress

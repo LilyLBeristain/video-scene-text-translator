@@ -118,8 +118,13 @@ export function StageProgress({
     const failedAt = stageIndex(failedStage) + 1; // 1-indexed for display
     elapsedReadout = `elapsed ${formatClock(elapsedMs)} \u00B7 crashed at Stage ${failedAt} of 5`;
   } else if (currentStage && activeStageElapsedMs !== undefined) {
-    // Total elapsed = completed-stage durations + live tick on the active one.
-    const prior = STAGES.filter((s) => stages[s] === "done").reduce(
+    // Total elapsed = completed-stage durations (strictly before the
+    // active one) + live tick on the active one. Restricting the sum
+    // domain to `STAGES[0 .. currentIdx)` guards against an out-of-order
+    // `stage_complete` event for a stage at / after `currentStage` —
+    // without this, a stale "done" state there would double-count.
+    const currentIdx = stageIndex(currentStage);
+    const prior = STAGES.slice(0, currentIdx).reduce(
       (acc, s) => acc + (stageDurations[s] ?? 0),
       0,
     );
