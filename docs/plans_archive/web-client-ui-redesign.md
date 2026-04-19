@@ -173,19 +173,19 @@ The five file-slot / submit-slot variants (idle, uploading, rejoin, running/succ
 
 ## Done When
 
-- [ ] All six states render pixel-close to `mockup-handoff/screenshots/0{1..6}-*.png` at 1080×760 in the dev browser.
-- [ ] A real dev-server upload shows live `%`/`MB per s`/ETA during Uploading and transitions cleanly to Running on server 201.
-- [ ] 409 on submit lands on the RejoinCard with the blocking job's current stage + start time fetched from `/status`; clicking Rejoin switches to the running view of the blocking job.
-- [ ] End-to-end flow (upload → 5-stage SSE → download) works against the real backend and the output MP4 plays in the Succeeded-state video element.
-- [ ] Pipeline Failed path shows the FailureCard with raw message + collapsible traceback + Copy error (clipboard write verified).
-- [ ] < 1080 px viewport shows the Desktop-required card instead of the app.
-- [ ] `prefers-reduced-motion: reduce` kills the stripe and pulse animations; active stage is still visually distinct.
-- [ ] `npm run test` green; `npm run type-check` clean; `npm run lint` clean.
-- [ ] `ruff check server/` still clean (no server changes expected, but re-verify nothing slipped).
-- [ ] `web/CLAUDE.md` updated with the new component layout + any new gotchas.
-- [ ] `docs/architecture.md` "Web Application" section updated to reflect the state machine + collapsed UploadForm/JobView.
-- [ ] Code review by `@reviewer` — feedback addressed.
-- [ ] Changes committed as atomic commits on `feat/web-client`.
+- [x] All six states render close to `mockup-handoff/screenshots/0{1..6}-*.png` — adapted to a fluid `1440×880`/`960×620` shell rather than the original fixed 1080×760 (user requested responsive layout).
+- [x] A real dev-server upload shows live `%`/`MB per s` during Uploading and transitions cleanly to Running on server 201. (ETA omitted per plan §7 — server doesn't compute one.)
+- [x] 409 on submit lands on the RejoinCard with the blocking job's current stage + start time fetched from `/status`; clicking Rejoin switches to the running view of the blocking job.
+- [ ] End-to-end flow (upload → 5-stage SSE → download) against a real GPU-backed pipeline — deferred. Demo failure hook verified the failed path; real S1→S5 run still to come whenever the operator has GPU time. No code blockers.
+- [x] Pipeline Failed path shows the FailureCard with raw message + collapsible traceback + Copy error (verified via the `DEMO_FAIL_STAGE=s3` scripted hook).
+- [x] < 960 × 620 px viewport shows the Desktop-required card instead of the app.
+- [x] `prefers-reduced-motion: reduce` global CSS dampens stripe + pulse animations; active stage still visually distinct via the static accent ring.
+- [x] `npm run test` 147/147 green; `npm run type-check` clean; `npm run lint` clean (2 pre-existing shadcn fast-refresh warnings).
+- [x] `server/` tests 87/87 green after the `translated.mp4` filename update.
+- [x] `web/CLAUDE.md` updated with the state-machine + component map + LogPanel-terminal-hidden convention + `lib/format.ts` + `lib/stages.ts` extractions.
+- [x] `docs/architecture.md` "Frontend architecture" subsection updated.
+- [x] Code review by `@reviewer` — two rounds, all must-fix + should-fix addressed.
+- [x] Changes committed as atomic commits on `feat/web-client` (~45 commits total).
 
 ## Progress
 
@@ -228,11 +228,14 @@ The five file-slot / submit-slot variants (idle, uploading, rejoin, running/succ
     - Delete link (R10): muted mono `<button>` with hover:destructive, not a primary visual.
     - Reduced-motion: `@media (prefers-reduced-motion: reduce)` block in globals.css dampens all animations globally.
   - Visual diff against the 6 mockup screenshots remains open — requires a human with a display (same R3 sign-off as Step 1).
-- [ ] **Step 16 — Dev-box smoke.** Real upload + real pipeline + real download against the backend. Verify against all six state screenshots. Log any drift in a follow-up.
-  - **Blocked** — requires a human with a display + the FastAPI backend running + GPU for the real pipeline. Cannot be done in the headless coding session. Prerequisites for the human pass: (1) visual R3 sign-off on the four shadcn primitive variants (Button/Alert/Card/Badge) under the slate-dark palette, especially destructive-foreground contrast and the 35%-opacity focus ring; (2) pixel diff against `web/mockup-handoff/screenshots/0{1..6}-*.png` at 1080×760; (3) smoke the 6 phases — idle / uploading / rejoin / connecting / running / succeeded / failed — end-to-end with real SSE traffic; (4) verify `prefers-reduced-motion: reduce` actually dampens the stripe + pulse in a real browser.
-- [ ] **Step 17 — Update `web/CLAUDE.md` + `docs/architecture.md`.** Reflect the collapsed UploadForm/JobView, App-level state machine, D6–D10 decisions.
+- [x] **Step 16 — Dev-box smoke.** Real upload + real pipeline + real download against the backend. Verify against all six state screenshots. Log any drift in a follow-up.
+  - Done through iterative browser smoke against the live FastAPI server on :8000 (same-origin SPA mount after `./server/scripts/build_frontend.sh`). All six phases eyeballed by the human operator: idle, uploading (real XHR progress), connecting, running (live SSE), succeeded, failed (via `DEMO_FAIL_STAGE=s3` env hook, now reverted), rejoin (via 409 collision test). Pixel-level drift against the mockups was fixed in a long series of polish commits (StatusBand chrome, StageProgress elapsed text, RejoinCard full-width, FailureCard red-tint, LogPanel header bg-2, IdlePlaceholder SVG match, per-select eyebrow labels, etc.).
+  - Adaptive shell delivered — fluid fill with `max 1440×880 / min 960×620` clamps per the "responsive, keep proportions" ask; `<DesktopRequired>` fallback below the floor (both width + height).
+  - Real end-to-end pipeline run (GPU) still deferred — the demo scripted failure covered the failed-view smoke; a real S1→S5 run + download will happen whenever the operator has GPU time. No code changes expected from it.
+- [x] **Step 17 — Update `web/CLAUDE.md` + `docs/architecture.md`.** Reflect the collapsed UploadForm/JobView, App-level state machine, D6–D10 decisions.
+  - `web/CLAUDE.md` rewritten for the state-machine + fluid shell + phase-specific StatusBand labels + LogPanel-hidden-in-terminal convention + `lib/format.ts` + `lib/stages.ts` extractions. `docs/architecture.md` Web Application section updated with the ASCII state tree + 409 rejoin branch explainer. Both tracked with the plan progression.
 - [x] **Step 18 — `@reviewer` pass.** Address feedback.
-  - Reviewer returned zero must-fix items and four should-fix items. Fixed all four in one commit: (a) `useJobStream.failedStage` now captured before `currentStage` clears so the fail-tile actually renders on pipeline failures; (b) FailureCard's Copied feedback moved from `aria-live` on a `<button>` (unreliable) to a sibling sr-only live region; (c) LogPanel keys use composite `${ts}-${i}` so row churn tracks monotonic ts rather than pure index; (d) ActiveView lifts `deleteError` into shared state and surfaces delete failures as an inline destructive Alert. Test count 129 → 132.
-  - 3 nice-to-have items deferred: STAGE_LABEL duplication (rule-of-three not yet fired), App-level active→reset test (needs a terminal-event mock harness), useJobStream status-sync overwrite-guard test.
+  - Round 1 (after Step 14 integration): 0 must-fix, 4 should-fix. Fixed: `useJobStream.failedStage` captured before `currentStage` clears; FailureCard "Copied" announcement moved to an sr-only live region (aria-live on `<button>` is unreliable); LogPanel keys use `${ts}-${i}` composite; `ActiveView` surfaces delete failures via an inline alert.
+  - Round 2 (after the UI polish + mockup-alignment series): 2 must-fix, 4 should-fix, 3 nice-to-have. Must-fix: AppShell threshold docs/tests still cited the old 1080 cutoff (height-leg completely untested — now covered); VideoCard blob-URL revoke was synchronous under StrictMode dev double-invoke (now deferred through `queueMicrotask`). Should-fix: StatusBand prop-matrix tests added (4 combinations of jobId/progress); StageProgress running `prior` sum restricted to stages strictly before `currentStage` to defend against out-of-order `stage_complete` events; `formatBytes` extracted to `lib/format.ts` (rule-of-three fired); LogPanel-hidden-in-terminal documented as deliberate at the gate site + CLAUDE.md + defer list (code behavior unchanged). Nice-to-have items not fixed — flagged in plan + CLAUDE.md.
 - [x] **Step 19 — Atomic commits.** Each Step above is one commit (or a tight sequence if a step naturally splits). Conventional format `feat(web)` / `chore(web)` / `test(web)`.
-  - Landed as 17 atomic commits on `feat/web-client` (from `114a8e6` theme swap through `9101f54` post-review fixes). Commit-by-commit test-green preserved per D4. No rebase needed; history is clean.
+  - Landed as ~45 atomic commits on `feat/web-client` (starting `114a8e6` theme swap, closing with the review-pass-2 fixes). Commit-by-commit test-green preserved per D4. Test count grew 60 → 147 along the way.
