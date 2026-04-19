@@ -181,6 +181,7 @@ class RevertStage:
         warped_roi: np.ndarray,
         warped_alpha: np.ndarray,
         target_bbox: BBox,
+        src_center: tuple[int, int] | None = None,
         flags: int = cv2.NORMAL_CLONE,
     ) -> np.ndarray:
         """Composite the warped ROI into the frame using cv2.seamlessClone.
@@ -191,6 +192,15 @@ class RevertStage:
         Relies on the bbox expansion in `warp_roi_to_frame` to guarantee a
         zero-alpha border so the mask stays strictly interior (a hard
         requirement of cv2.seamlessClone).
+
+        ``src_center``: paste location in frame-space (integer pixel). When
+        supplied, it overrides the default ``bbox.x + bbox.width//2``
+        fallback. Callers should prefer a center derived from the
+        float-precision effective frame corners rounded once: computing it
+        from ``target_bbox`` applies two rounding steps (once for the
+        bbox origin, once for the half-width) that can disagree by 1 px
+        across frames and produce visible seamlessClone jitter even when
+        the underlying quad is still.
         """
         # Binarize the feathered alpha into a clone mask.
         mask = (warped_alpha > 0).astype(np.uint8) * 255
@@ -199,11 +209,13 @@ class RevertStage:
 
         src = warped_roi
 
-        # Center of the bbox in destination (frame) coordinates.
-        center = (
-            target_bbox.x + target_bbox.width // 2,
-            target_bbox.y + target_bbox.height // 2,
-        )
+        if src_center is None:
+            center = (
+                target_bbox.x + target_bbox.width // 2,
+                target_bbox.y + target_bbox.height // 2,
+            )
+        else:
+            center = src_center
 
         # seamlessClone requires the source (centered at `center`) to lie
         # entirely within the destination. Bail out to alpha blending if not.
@@ -266,6 +278,27 @@ class RevertStage:
     # ------------------------------------------------------------------
     # Temporal corner smoothing
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _seamless_center_from_corners(
+        corners: np.ndarray,
+    ) -> tuple[int, int]:
+        """Round-once bbox-midpoint center from float frame-space corners.
+
+        The default seamlessClone center in ``composite_roi_into_frame_seamless``
+        is ``bbox.x + bbox.width // 2``. Since ``bbox.x`` and ``bbox.width``
+        are each independently ``int(round(...))`` of the floating-point
+        quad, the two roundings can disagree by ±1 px across frames even
+        when the underlying float midpoint is essentially still — that
+        manifests as seamlessClone seed-pixel jitter, which in turn shifts
+        the Poisson-blended composite by a pixel frame to frame. Rounding
+        the float midpoint once removes that amplification.
+        """
+        xs = corners[:, 0]
+        ys = corners[:, 1]
+        cx = (float(xs.min()) + float(xs.max())) / 2.0
+        cy = (float(ys.min()) + float(ys.max())) / 2.0
+        return (int(round(cx)), int(round(cy)))
 
     @staticmethod
     def _project_canonical_to_frame(
@@ -690,8 +723,33 @@ class RevertStage:
                         frame, warped_roi, warped_alpha, target_bbox
                     )
                 else:
+                    # Derive the seamlessClone center from the effective
+                    # frame-space corners (post-refiner / post-smoothing)
+                    # rounded once, instead of letting cv2.seamlessClone
+                    # fall back to the int-bbox-based midpoint which
+                    # jitters by 1 px across frames as two independent
+                    # roundings cross half-integer boundaries.
+                    src_center: tuple[int, int] | None = None
+                    if track.canonical_size is not None:
+                        w_can, h_can = track.canonical_size
+                        can_corners = np.array(
+                            [[0, 0], [w_can, 0], [w_can, h_can], [0, h_can]],
+                            dtype=np.float64,
+                        )
+                        if smoothed_H is not None:
+                            eff_corners = self._project_canonical_to_frame(
+                                smoothed_H, can_corners,
+                            )
+                        else:
+                            eff_corners = self._project_canonical_to_frame(
+                                det.H_from_frontal, can_corners, delta_H,
+                            )
+                        src_center = self._seamless_center_from_corners(
+                            eff_corners,
+                        )
                     frame = self.composite_roi_into_frame_seamless(
-                        frame, warped_roi, warped_alpha, target_bbox
+                        frame, warped_roi, warped_alpha, target_bbox,
+                        src_center=src_center,
                     )
 
             output_frames.append(frame)
