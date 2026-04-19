@@ -105,3 +105,251 @@ Streaming 2-pass pipeline for generating training data for the TPM (Text Propaga
 - Stage C: STTN model integration approach (replaces S2 homography with learned spatial transformer)
 - Stage C: TPM model integration approach (replaces S4 histogram matching with LCM + BPN) — TPM data gen pipeline now exists to produce training data
 - ~~Sliding-window frame loading strategy for long videos~~ — **Resolved**: streaming 2-pass architecture in TPM data gen pipeline. Main pipeline still in-memory.
+
+## Web Application
+
+Browser-based live-demo frontend for the pipeline. Single FastAPI process
+serves the React SPA and the `/api/*` surface; pipeline runs in-process on
+one worker thread.
+
+```
+┌─────────────────────────┐
+│  Browser                │
+│  React + Vite + TS      │
+│  Tailwind + shadcn/ui   │
+└──────────┬──────────────┘
+           │ HTTP + SSE (same origin)
+           ▼
+┌──────────────────────────────────────────────┐
+│  FastAPI (uvicorn) on GPU box                │
+│  ├── /api/*    REST + SSE                    │
+│  └── /        static React bundle            │
+│                                              │
+│  JobManager (1 worker thread, in-mem dict)   │
+│    │                                         │
+│    ▼                                         │
+│  PipelineRunner                              │
+│    ├── attaches logging.Handler              │
+│    │   → asyncio.Queue → SSE                 │
+│    ├── passes progress_callback              │
+│    │   → VideoPipeline                       │
+│    └── calls VideoPipeline(config).run()     │
+└──────────┬───────────────────────────────────┘
+           │ HTTP
+           ▼
+┌────────────────────────┐
+│  AnyText2 Gradio server│   (already external,
+│  (separate process)    │    unchanged)
+└────────────────────────┘
+```
+
+### What lives where
+- `server/` — FastAPI app (`app/main.py`), routes (`app/routes.py`), job
+  registry + single-worker executor (`app/jobs.py`), pipeline wrapper
+  (`app/pipeline_runner.py`), storage (`app/storage.py`), Pydantic
+  schemas (`app/schemas.py`), curated language list
+  (`app/languages.py`). Tests in `server/tests/`. Nested conventions
+  doc at `server/CLAUDE.md`.
+- `web/` — React 18 + Vite + TS SPA with a fixed 1080×760 two-column
+  layout driven by a state machine in `App.tsx`. Nested conventions
+  doc at `web/CLAUDE.md`.
+
+### Frontend architecture
+
+`<App>` is the single state-machine owner. It holds a `useReducer<UiState>`
+with four discriminated phases — the old `<UploadForm>` / `<JobView>`
+toggle was collapsed in the UI redesign:
+
+```
+UiState =
+  | { phase: "idle";      file, source, target, submitError? }
+  | { phase: "uploading"; file, source, target, progress }
+  | { phase: "rejoin";    file, source, target, blockingJobId, blockingStatus? }
+  | { phase: "active";    jobId, file, source, target }
+```
+
+Transitions (dispatch-only; no imperative state pokes):
+- `idle → uploading` on submit; XHR starts.
+- `uploading → active` on XHR 201 (`uploadSucceeded`).
+- `uploading → rejoin` on XHR 409 (`uploadBlocked`, blockingJobId from
+  `ApiError.concurrentJobDetail`).
+- `uploading → idle` on XHR 4xx / network error (`uploadFailed`,
+  re-renders with a `SubmitError`).
+- `rejoin → active` on Rejoin click (file cleared — someone else's job).
+- `active (terminal) → idle` on Submit-another / Delete-job.
+
+Component tree while `phase !== "active"`:
+
+```
+<App>
+└── <AppShell left={...} right={...}>       (fixed 1080×760 frame;
+    ├── <LeftColumn>                         renders <DesktopRequired>
+    │   ├── <IdentityBlock>                  below 1080 px viewport)
+    │   ├── {fileSlot}    — Dropzone | VideoCard
+    │   ├── <LanguagePair> — native <select> × 2 + swap ↕
+    │   └── {submitSlot}  — SubmitBar(idle|uploading|running|terminal)
+    └── right column surfaces:
+        ├── <StatusBand>
+        └── one of: <IdlePlaceholder>, <UploadProgress>, <RejoinCard>
+```
+
+While `phase === "active"`, `<App>` delegates to a nested `<ActiveView>`
+that instantiates `useJobStream(jobId)` exactly once. The hook state is
+threaded into both columns, guaranteeing a single SSE subscription per
+job:
+
+```
+<App> (phase === "active")
+└── <ActiveView> — owns useJobStream(jobId)
+    └── <AppShell>
+        ├── <LeftColumn>            (file slot locked; LanguagePair locked;
+        │                            SubmitBar = running until terminal)
+        └── right column:
+            ├── <StatusBand kind={connecting|running|succeeded|failed}>
+            ├── <StageProgress>     (5 tiles + elapsed row; reads
+            │                        activeStageElapsedMs from the hook)
+            ├── <LogPanel>          (mono list + severity chip)
+            ├── <ResultPanel>       (succeeded only — <video> + Download)
+            └── <FailureCard>       (failed only — replaces old ErrorAlert)
+```
+
+Component inventory, grouped by area:
+- **Shell**: `AppShell`, `DesktopRequired`.
+- **Left column**: `left/LeftColumn`, `left/IdentityBlock`,
+  `left/VideoCard`, `left/LanguagePair`, `left/SubmitBar`.
+- **Right column**: `right/StatusBand`, `right/IdlePlaceholder`,
+  `right/UploadProgress`, `right/RejoinCard`, `right/FailureCard`.
+- **Primitives (shared across phases)**: `Dropzone`, `LanguageSelect`
+  (native `<select>`; Radix was dropped here), `StageProgress`,
+  `LogPanel`, `ResultPanel`. shadcn primitives (`Button`, `Card`,
+  `Alert`, `Badge`, `Input`, `Label`) under `components/ui/`.
+- **Hooks**: `useJobStream` in `src/hooks/`.
+- **API**: `api/client.ts` (fetch + XHR), `api/sse.ts` (EventSource
+  wrapper with auto-resync), `api/schemas.ts` (TS mirror of
+  `server/app/schemas.py`).
+
+### Upload progress (XHR)
+`createJob(file, source, target, { onProgress?, signal? })` uses
+XMLHttpRequest rather than `fetch` so the uploading phase can surface
+real `%` / `MB/s` / ETA. The XHR `progress` event feeds an
+`UploadProgress` snapshot into the reducer (`uploadProgress` action);
+`<UploadProgress>` on the right renders the bar + bytes + rate. An
+`AbortController` cancels the XHR on unmount (no user-facing cancel
+button — deferred). All non-upload helpers (`getHealth`, `getLanguages`,
+`getJobStatus`, `deleteJob`) stay on `fetch`.
+
+### SSE + active-stage tick
+`useJobStream` seeds from `GET /status` (so a page-reload rejoin reveals
+the current stage immediately), subscribes to SSE via `openEventStream`,
+and folds each event into a reducer-style state. It additionally emits
+an `activeStageElapsedMs` value driven by a `setInterval(1000)` bound to
+the current `stage_start.ts`. The interval is cleared on stage change,
+terminal event, and unmount. `StageProgress` reads the tick to render
+the active tile's "32s" readout.
+
+### 409 rejoin branch
+When `createJob` rejects with `ApiError.status === 409`, `App.tsx`
+reads `err.concurrentJobDetail.active_job_id` and dispatches
+`uploadBlocked`. A `useEffect` on the rejoin phase then calls
+`getJobStatus(blockingJobId)` and dispatches `blockingStatusLoaded` —
+non-fatal, the card falls back to generic copy if the fetch fails.
+`<RejoinCard>` renders the fetched metadata (current stage, started-at)
+and a Rejoin CTA that transitions to `active` with `file === null`.
+
+### API surface
+
+| Method | Path                            | Purpose |
+|--------|---------------------------------|---------|
+| POST   | `/api/jobs`                     | multipart: `video` file + `source_lang` + `target_lang` → `{job_id}` |
+| GET    | `/api/jobs/{job_id}/status`     | `{status, current_stage?, created_at, finished_at?, error?, output_available}` |
+| GET    | `/api/jobs/{job_id}/events`     | SSE stream of events (see below) |
+| GET    | `/api/jobs/{job_id}/output`     | streams the output MP4, `Content-Disposition: attachment` |
+| DELETE | `/api/jobs/{job_id}`            | deletes job + files (409 if running) |
+| GET    | `/api/languages`                | `[{code, label}, ...]` — curated list for the dropdown |
+| GET    | `/` (and other static paths)    | serves the built React bundle |
+
+### SSE event shapes
+
+```ts
+type Event =
+  | { type: "stage_start",    stage: "s1"|"s2"|"s3"|"s4"|"s5", ts: number }
+  | { type: "stage_complete", stage: "s1"|"s2"|"s3"|"s4"|"s5", duration_ms: number, ts: number }
+  | { type: "log",            level: "info"|"warning"|"error", message: string, ts: number }
+  | { type: "done",           output_url: string, ts: number }
+  | { type: "error",          message: string, traceback?: string, ts: number }
+```
+
+### Job lifecycle
+1. `POST /api/jobs` (multipart) → upload streamed to
+   `server/storage/uploads/{job_id}/`; pipeline queued. Response
+   `{job_id}`. Second submit while one is active → 409 with
+   `{error: "concurrent_job", active_job_id}` so the client can render
+   a rejoin link (R8) instead of a hard error.
+2. Queued → `running` when the worker picks the job up.
+3. `running` — the SSE stream emits `stage_start` / `stage_complete`
+   events (10 per run, 5 stages × start/done) plus interleaved `log`
+   events forwarded from the pipeline's `src.*` logger tree.
+4. Terminal — either `done` (with `output_url = /api/jobs/{id}/output`)
+   or `error` (with `message` + `traceback`). The event stream closes
+   after the terminal event.
+
+### Concurrency + persistence model
+- Single `ThreadPoolExecutor(max_workers=1)` owned by `JobManager`.
+  Only one `VideoPipeline.run()` is ever in flight. A second submit
+  raises `ConcurrentJobError` (→ 409).
+- In-memory `dict[str, _JobRecord]` keyed by UUID4. No database, no
+  disk persistence. Server restart loses all job state.
+- Cleanup paths:
+  (a) explicit `DELETE /api/jobs/{id}` removes the record + files;
+  (b) TTL sweep on boot (`storage.sweep_old_jobs(ttl_hours=2)`) purges
+  job dirs older than 2 hours from the last crash.
+
+### Key design decisions
+- **In-process import, not subprocess (D3).** `from src.pipeline import
+  VideoPipeline; pipeline.run()` on a `ThreadPoolExecutor` worker. Lazy
+  imports inside `pipeline_runner.run_pipeline_job` keep FastAPI boot
+  free of torch/paddle/cv2.
+- **SSE over WebSocket (D5).** One-way pipeline → browser only. Browser
+  `EventSource` handles auto-reconnect; no framing layer to maintain.
+  Implemented via `sse_starlette.EventSourceResponse`.
+- **Same-origin, no CORS (D9).** FastAPI `app.mount("/",
+  StaticFiles(...))` serves the built SPA after
+  `app.include_router(router)` (order matters — static must come last).
+  Dev uses Vite proxy forwarding `/api/*` to `:8000`.
+- **Structured progress via `progress_callback` (D11).** 5-line
+  pipeline change: `VideoPipeline.__init__` gained an optional
+  `progress_callback: Callable[[str], None]`; called with
+  `"stage_N_{start|done}"`. Runner adapts strings → `StageStartEvent` /
+  `StageCompleteEvent`. Chosen over log-message parsing for stability.
+- **D16 terminal-state-flip invariant.** The `emit` closure in
+  `JobManager._run_job` flips `record.status` to `succeeded` / `failed`
+  *before* enqueueing the terminal event. A client that reads
+  `DoneEvent` over SSE and races to `/status` cannot observe a stale
+  `"running"`. Symmetric for error path.
+- **Output MP4 transcoded via ffmpeg (R3 / D15).** OpenCV's
+  `VideoWriter` with `mp4v` fourcc emits `FMP4` (MPEG-4 Part 2), which
+  browsers refuse to play. `pipeline_runner._transcode_to_browser_safe`
+  shells out to `ffmpeg -c:v libx264 -pix_fmt yuv420p -movflags
+  +faststart` after `VideoPipeline.run()` and atomic-swaps the file.
+
+### Known limitations
+- **No real cancellation (D14, R1).** `DELETE /api/jobs/{id}` on a
+  running job returns 409. Cooperative cancellation would require
+  stop-flag checks inside the pipeline — out of scope for MVP.
+- **Single-worker queue-of-one (D4, R8).** A second submit during a
+  running job is rejected. Mitigated client-side with the rejoin link
+  in the 409 body, not by actually queueing.
+- **Long videos still break (>500 frames).** The main `VideoPipeline`
+  holds all frames in memory (see Known Limitations above). The web
+  app inherits this; TPM data gen's streaming architecture has not
+  been ported to the main pipeline. Upload size is capped at 200 MiB
+  (R2) as a rough bound.
+- **Browser codec assumption.** Relies on ffmpeg being on PATH for the
+  transcode step. Validated at integration-test time (R3); missing
+  ffmpeg surfaces as a `RuntimeError` → `ErrorEvent`.
+
+### Running the app
+Run instructions live in the [README's Web Application section](../README.md#web-application)
+(canonical). This doc covers design only; commands are kept out of here to
+avoid drift. tl;dr: `./server/scripts/dev.sh` for hot-reload dev,
+`./server/scripts/build_frontend.sh` then `uvicorn` for prod/demo.

@@ -7,6 +7,7 @@ and passes it through the editor to produce a translated ROI.
 from __future__ import annotations
 
 import logging
+import time
 
 import cv2
 import numpy as np
@@ -209,7 +210,7 @@ class TextEditingStage:
 
         expansion = self.config.roi_context_expansion
 
-        for track in tracks:
+        for track_idx, track in enumerate(tracks, start=1):
             ref_idx = track.reference_frame_idx
             if ref_idx < 0 or ref_idx not in frames:
                 logger.warning(
@@ -262,8 +263,32 @@ class TextEditingStage:
             else:
                 original_canonical = roi.copy()
 
-            edited_roi = editor.edit_text(
-                roi, track.target_text, edit_region=edit_region,
+            # Log entry/exit around the editor call so a silent hang (e.g.
+            # AnyText2 Gradio stall without raising) is visible in the
+            # per-region timing. Exception context identifies which track /
+            # region tripped so the re-raise up the stack is debuggable.
+            logger.info(
+                "S3: Track %d/%d (id=%d): submitting to editor "
+                "(ROI shape: %s, edit_region=%s, target='%s')",
+                track_idx, len(tracks), track.track_id,
+                roi.shape, edit_region, track.target_text,
+            )
+            t_edit_start = time.monotonic()
+            try:
+                edited_roi = editor.edit_text(
+                    roi, track.target_text, edit_region=edit_region,
+                )
+            except Exception:
+                elapsed = time.monotonic() - t_edit_start
+                logger.exception(
+                    "S3: Track %d/%d (id=%d) editor call failed after %.1fs",
+                    track_idx, len(tracks), track.track_id, elapsed,
+                )
+                raise
+            logger.info(
+                "S3: Track %d/%d (id=%d) edited in %.1fs",
+                track_idx, len(tracks), track.track_id,
+                time.monotonic() - t_edit_start,
             )
 
             # When expanded, crop back to the original canonical area

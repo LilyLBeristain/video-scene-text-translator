@@ -1,0 +1,1351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scene Text Translator · Mid-fi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ TOKENS ============ */
+  /* slate dark — cool grey, Linear-ish */
+  :root {
+    --bg-0: #0a0d12;
+    --bg-1: #11151c;
+    --bg-2: #171c25;
+    --bg-3: #1e2530;
+    --bg-4: #262f3b;
+    --line: #232a35;
+    --line-2: #2e3745;
+
+    --ink-0: #e6eaf2;
+    --ink-1: #a8b2c1;
+    --ink-2: #6b7686;
+    --ink-3: #444e5e;
+
+    --acc: #5eaeff;
+    --acc-hi: #7ebeff;
+    --acc-soft: rgba(94,174,255,0.12);
+    --acc-line: rgba(94,174,255,0.35);
+    --acc-rgb: 94,174,255;
+
+    /* semantic */
+    --ok: #4ade80;
+    --ok-soft: rgba(74,222,128,0.10);
+    --warn: #fbbf24;
+    --warn-soft: rgba(251,191,36,0.10);
+    --warn-line: rgba(251,191,36,0.40);
+    --warn-rgb: 251,191,36;
+    --err: #f87171;
+    --err-soft: rgba(248,113,113,0.12);
+    --err-line: rgba(248,113,113,0.40);
+
+    /* type */
+    --ff-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --ff-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+    /* radii & shadows */
+    --r-sm: 4px;
+    --r-md: 6px;
+    --r-lg: 8px;
+    --sh-1: 0 1px 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,0.4);
+    --sh-2: 0 4px 12px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.04) inset;
+    --sh-glow: 0 0 0 1px var(--acc-line), 0 0 24px rgba(var(--acc-rgb),0.15);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg-0); color: var(--ink-0); font-family: var(--ff-sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+  /* ============ CANVAS LAYOUT ============ */
+  .canvas-head {
+    padding: 40px 48px 28px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 40px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--bg-3), var(--bg-1));
+    border: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .brand-mark::before {
+    content: ''; position: absolute; inset: 6px;
+    border: 1.5px dashed var(--acc); border-radius: 3px; opacity: 0.9;
+  }
+  .brand-mark::after {
+    content: 'A̴'; font-family: var(--ff-mono); font-size: 14px; color: var(--acc); font-weight: 700;
+    position: relative;
+  }
+  .brand h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+  .brand .subtitle { font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2); margin-top: 2px; letter-spacing: 0.02em; }
+
+  .canvas-meta {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+    text-align: right; line-height: 1.7;
+  }
+  .canvas-meta b { color: var(--ink-1); font-weight: 500; }
+
+  .canvas-intro {
+    padding: 28px 48px 8px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 32px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 48px;
+  }
+  .intro-block h3 {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-2);
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .intro-block p { color: var(--ink-1); font-size: 13px; line-height: 1.55; }
+  .intro-block .mono { font-family: var(--ff-mono); font-size: 12px; color: var(--ink-0); }
+
+  .intro-block .swatches {
+    display: flex; gap: 6px; margin-top: 6px;
+  }
+  .sw { width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.06); }
+
+  /* ============ STATE SECTION HEAD ============ */
+  .section-head {
+    padding: 0 48px 16px;
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 32px;
+    margin-top: 56px;
+  }
+  .section-head:first-of-type { margin-top: 0; }
+  .section-head .n {
+    font-family: var(--ff-mono); font-size: 12px; color: var(--ink-2);
+    letter-spacing: 0.08em;
+  }
+  .section-head h2 {
+    font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+    margin-top: 4px;
+  }
+  .section-head .note {
+    color: var(--ink-1); font-size: 13px; max-width: 640px; text-align: right;
+    line-height: 1.55;
+  }
+
+  .stage-frame {
+    margin: 0 48px 40px;
+    background: var(--bg-0);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+    overflow: hidden;
+  }
+
+  /* ============ APP SHELL ============ */
+  .app {
+    width: 100%;
+    height: 760px;
+    background: var(--bg-0);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line);
+  }
+
+  .titlebar {
+    height: 40px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .traffic { display: flex; gap: 7px; }
+  .traffic i { width: 11px; height: 11px; border-radius: 50%; background: var(--bg-3); display: block; }
+  .traffic i:nth-child(1) { background: #ff5f57; }
+  .traffic i:nth-child(2) { background: #febc2e; }
+  .traffic i:nth-child(3) { background: #28c840; }
+  .titlebar .title {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
+  .titlebar .spacer { flex: 1; }
+  .titlebar .job-chip {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-1);
+    padding: 4px 10px; border-radius: 4px; background: var(--bg-2);
+    display: flex; gap: 10px; align-items: center;
+  }
+  .job-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 8px var(--acc); }
+  .job-chip .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .job-chip .dot.err { background: var(--err); box-shadow: 0 0 8px var(--err); }
+  .job-chip .dot.idle { background: var(--ink-3); box-shadow: none; }
+  .job-chip .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .job-chip b { color: var(--ink-0); font-weight: 500; }
+
+  /* ============ GRID ============ */
+  .main {
+    flex: 1; display: grid; grid-template-columns: 400px 1fr;
+    gap: 0; min-height: 0;
+  }
+  .col {
+    padding: 22px 24px;
+    display: flex; flex-direction: column; gap: 16px;
+    min-height: 0;
+  }
+  .col.left {
+    border-right: 1px solid var(--line);
+    background: var(--bg-1);
+  }
+  .col.right {
+    background: var(--bg-0);
+  }
+
+  /* ============ TYPOGRAPHIC BITS ============ */
+  .label {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-2);
+    letter-spacing: 0.12em; text-transform: uppercase; font-weight: 500;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .identity h2 {
+    font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+    margin-top: 4px;
+  }
+  .identity p {
+    color: var(--ink-2); font-size: 12px; margin-top: 2px;
+  }
+
+  /* ============ BADGES ============ */
+  .badge {
+    font-family: var(--ff-mono); font-size: 9px; font-weight: 600;
+    padding: 3px 7px; border-radius: 3px;
+    letter-spacing: 0.08em;
+    background: var(--bg-3); color: var(--ink-1);
+    border: 1px solid var(--line-2);
+  }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(74,222,128,0.25); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(251,191,36,0.25); }
+  .badge.err { background: var(--err-soft); color: var(--err); border-color: var(--err-line); }
+  .badge.acc { background: var(--acc-soft); color: var(--acc); border-color: var(--acc-line); }
+
+  /* ============ DROP ZONE ============ */
+  .drop {
+    flex: 1;
+    border: 1.5px dashed var(--line-2);
+    border-radius: var(--r-md);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 20px; gap: 10px;
+    background: transparent;
+    min-height: 220px;
+    text-align: center;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .drop:hover { border-color: var(--acc-line); background: var(--acc-soft); }
+  .drop .ic {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--bg-2); border: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-1); margin-bottom: 4px;
+  }
+  .drop h4 { font-size: 15px; font-weight: 600; color: var(--ink-0); letter-spacing: -0.01em; }
+  .drop .sub { color: var(--ink-2); font-size: 12px; }
+  .drop .tiny { color: var(--ink-3); font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.06em; margin-top: 4px; }
+
+  /* ============ VIDEO CARD ============ */
+  .video-card {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .video-frame {
+    aspect-ratio: 9 / 16;
+    border-radius: var(--r-md);
+    background: #000;
+    position: relative;
+    overflow: hidden;
+    max-height: 380px;
+    border: 1px solid var(--line-2);
+  }
+  .video-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .video-frame .play {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.15);
+    transition: all 0.15s ease;
+  }
+  .video-frame .play:hover { background: rgba(0,0,0,0.3); }
+  .video-frame .play-btn {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    display: flex; align-items: center; justify-content: center;
+    color: #000;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .video-frame .replace {
+    position: absolute; top: 8px; right: 8px;
+    font-family: var(--ff-mono); font-size: 10px;
+    padding: 5px 10px; border-radius: 4px;
+    background: rgba(0,0,0,0.7); color: var(--ink-0);
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .video-frame .replace:hover { background: rgba(0,0,0,0.85); }
+  .video-frame .corner-tag {
+    position: absolute; top: 8px; left: 8px;
+    font-family: var(--ff-mono); font-size: 9px;
+    padding: 4px 7px; border-radius: 3px;
+    background: rgba(0,0,0,0.7); color: var(--ink-1);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    backdrop-filter: blur(8px);
+  }
+  .video-frame .corner-tag.ok { color: var(--ok); }
+  .scrubber {
+    display: flex; gap: 10px; align-items: center;
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+  }
+  .scrub-track {
+    flex: 1; height: 3px; background: var(--bg-3); border-radius: 2px; position: relative; cursor: pointer;
+  }
+  .scrub-track .fill { height: 100%; border-radius: 2px; background: var(--acc); }
+  .scrub-track .dot {
+    position: absolute; top: 50%; transform: translate(-50%,-50%);
+    width: 12px; height: 12px; background: var(--acc); border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(var(--acc-rgb),0.2);
+  }
+  .video-meta {
+    display: flex; justify-content: space-between;
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+
+  /* ============ LANGUAGE PAIR ============ */
+  .lang-box {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 14px;
+  }
+  .lang-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .lang-select {
+    flex: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .lang-select:hover { border-color: var(--bg-4); }
+  .lang-select .code {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-2);
+    background: var(--bg-3); padding: 2px 6px; border-radius: 2px; letter-spacing: 0.04em;
+  }
+  .lang-select .name { font-size: 14px; font-weight: 500; color: var(--ink-0); }
+  .lang-select .caret { color: var(--ink-2); }
+  .swap {
+    width: 32px; height: 32px; border-radius: var(--r-sm);
+    background: var(--bg-1); border: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-1); cursor: pointer; transition: all 0.15s;
+  }
+  .swap:hover { color: var(--acc); border-color: var(--acc-line); }
+  .lang-valid {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ok);
+    margin-top: 8px; letter-spacing: 0.06em; display: flex; align-items: center; gap: 5px;
+  }
+
+  /* ============ BUTTON ============ */
+  .btn {
+    appearance: none; border: none; cursor: pointer;
+    font-family: var(--ff-sans); font-size: 14px; font-weight: 500;
+    padding: 11px 16px; border-radius: var(--r-md);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: all 0.12s ease;
+    letter-spacing: -0.005em;
+  }
+  .btn.primary {
+    background: var(--acc); color: var(--bg-0);
+    box-shadow: 0 0 0 1px var(--acc-hi) inset, 0 0 16px rgba(var(--acc-rgb),0.25);
+    font-weight: 600;
+  }
+  .btn.primary:hover { background: var(--acc-hi); }
+  .btn.primary.disabled {
+    background: var(--bg-3); color: var(--ink-2); cursor: not-allowed;
+    box-shadow: 0 0 0 1px var(--line-2) inset; font-weight: 500;
+  }
+  .btn.primary.running {
+    background: var(--bg-2); color: var(--ink-1); cursor: not-allowed;
+    box-shadow: 0 0 0 1px var(--line-2) inset;
+    position: relative; overflow: hidden;
+  }
+  .btn.primary.running::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, var(--acc-soft), transparent);
+    animation: shimmer 2s infinite;
+  }
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); } 100% { transform: translateX(100%); }
+  }
+  .btn.ghost {
+    background: transparent; color: var(--ink-1); border: 1px solid var(--line-2);
+  }
+  .btn.ghost:hover { background: var(--bg-2); color: var(--ink-0); }
+  .btn.accent {
+    background: var(--bg-2); color: var(--acc);
+    box-shadow: 0 0 0 1px var(--acc-line) inset;
+  }
+  .btn.accent:hover { background: var(--acc-soft); }
+  .btn.success {
+    background: var(--ok); color: #061810;
+    box-shadow: 0 0 0 1px rgba(74,222,128,0.5) inset;
+    font-weight: 600;
+  }
+  .btn.success:hover { filter: brightness(1.1); }
+
+  .submit-bar { display: flex; flex-direction: column; gap: 6px; }
+  .submit-hint {
+    display: flex; justify-content: space-between;
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: 0.06em; padding: 0 2px;
+  }
+  .submit-hint a { color: var(--ink-2); text-decoration: none; }
+  .submit-hint a:hover { color: var(--err); }
+  .kbd { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 3px; padding: 1px 5px; font-family: var(--ff-mono); font-size: 10px; color: var(--ink-1); }
+
+  /* ============ RIGHT COLUMN ============ */
+  .right-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 4px;
+  }
+
+  /* pipeline stage bar */
+  .stages {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px;
+    background: var(--bg-2);
+    padding: 4px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line);
+  }
+  .stage {
+    padding: 10px 8px;
+    border-radius: 4px;
+    display: flex; flex-direction: column; gap: 2px;
+    background: transparent;
+    position: relative;
+    transition: all 0.15s ease;
+  }
+  .stage .no {
+    font-family: var(--ff-mono); font-size: 9px; color: var(--ink-3);
+    letter-spacing: 0.08em; display: flex; align-items: center; gap: 4px;
+  }
+  .stage .nm { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .stage .dur { font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.02em; }
+  .stage.done { background: var(--bg-3); }
+  .stage.done .no { color: var(--ok); }
+  .stage.done .no::before { content: '✓'; font-weight: 700; }
+  .stage.done .nm { color: var(--ink-0); }
+  .stage.done .dur { color: var(--ink-1); }
+  .stage.active {
+    background: var(--acc-soft);
+    box-shadow: 0 0 0 1px var(--acc-line);
+  }
+  .stage.active .no { color: var(--acc); }
+  .stage.active .no::before { content: '●'; animation: pulse 1.4s infinite; }
+  .stage.active .nm { color: var(--ink-0); }
+  .stage.active .dur { color: var(--acc); }
+  .stage.fail {
+    background: var(--err-soft);
+    box-shadow: 0 0 0 1px var(--err-line);
+  }
+  .stage.fail .no { color: var(--err); }
+  .stage.fail .no::before { content: '✗'; font-weight: 700; }
+  .stage.fail .nm { color: var(--err); }
+  .stage.fail .dur { color: var(--err); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* elapsed row */
+  .elapsed {
+    display: flex; gap: 14px; align-items: center;
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+    letter-spacing: 0.01em;
+  }
+  .elapsed b { color: var(--ink-0); font-weight: 500; }
+  .meter {
+    flex: 1; height: 3px; background: var(--bg-3); border-radius: 2px; overflow: hidden; min-width: 80px;
+  }
+  .meter span { display: block; height: 100%; background: var(--acc); border-radius: 2px; }
+  .meter.stripe span {
+    background: linear-gradient(-45deg, var(--acc) 25%, var(--acc-hi) 25%, var(--acc-hi) 50%, var(--acc) 50%, var(--acc) 75%, var(--acc-hi) 75%);
+    background-size: 10px 10px;
+    animation: stripe 1s linear infinite;
+  }
+  @keyframes stripe { 0% { background-position: 0 0; } 100% { background-position: 10px 0; } }
+
+  /* log */
+  .log-box {
+    flex: 1;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    display: flex; flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .log-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--bg-2);
+  }
+  .log-head h4 { font-size: 12px; font-weight: 600; color: var(--ink-0); }
+  .log-head .meta-tag { font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; }
+  .log {
+    flex: 1;
+    padding: 12px 14px;
+    font-family: var(--ff-mono); font-size: 12px; line-height: 1.6;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .log div { color: var(--ink-1); white-space: pre-wrap; }
+  .log .t { color: var(--ink-3); }
+  .log .lv { display: inline-block; width: 44px; font-weight: 600; }
+  .log .lv.i { color: var(--acc); }
+  .log .lv.w { color: var(--warn); }
+  .log .lv.e { color: var(--err); }
+  .log .dim { color: var(--ink-3); font-style: italic; }
+  .log .hdr { color: var(--ink-0); font-weight: 600; margin-top: 4px; }
+  .log .cur {
+    display: inline-block; width: 7px; height: 14px; background: var(--acc);
+    vertical-align: -2px; margin-left: 3px;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* result */
+  .result-wrap { flex: 1; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .result-video {
+    flex: 1;
+    border-radius: var(--r-md);
+    background: #000;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+    border: 1px solid var(--line-2);
+  }
+  .result-video img { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .result-video .corner-tag {
+    position: absolute; top: 10px; left: 10px;
+    font-family: var(--ff-mono); font-size: 10px;
+    padding: 5px 9px; border-radius: 3px;
+    background: rgba(0,0,0,0.7); color: var(--ok);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    backdrop-filter: blur(8px);
+  }
+  .result-video .compare-pill {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 2px; padding: 3px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 20px; backdrop-filter: blur(8px);
+  }
+  .result-video .compare-pill button {
+    appearance: none; border: none; background: transparent; color: var(--ink-1);
+    font-family: var(--ff-mono); font-size: 10px; padding: 4px 12px; border-radius: 16px;
+    cursor: pointer; letter-spacing: 0.04em;
+  }
+  .result-video .compare-pill button.on { background: var(--ink-0); color: #000; }
+  .result-actions { display: flex; gap: 8px; }
+
+  /* failure */
+  .fail-wrap { flex: 1; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .fail-card {
+    flex: 1;
+    background: var(--err-soft);
+    border: 1px solid var(--err-line);
+    border-radius: var(--r-md);
+    padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    overflow: auto;
+  }
+  .fail-card .fail-label {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--err);
+    letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .fail-card h3 { font-size: 17px; font-weight: 600; color: var(--err); letter-spacing: -0.01em; }
+  .fail-card .fail-desc { color: var(--ink-1); font-size: 13px; margin-top: 2px; }
+  .fail-card details { margin-top: 8px; }
+  .fail-card summary {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-1);
+    cursor: pointer; padding: 6px 0;
+    letter-spacing: 0.02em;
+  }
+  .fail-card summary:hover { color: var(--ink-0); }
+  .fail-card pre {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-1);
+    background: rgba(0,0,0,0.3); padding: 12px; border-radius: 4px;
+    margin-top: 6px; overflow: auto; line-height: 1.5;
+    border: 1px solid var(--err-line);
+  }
+  .fail-actions { display: flex; gap: 8px; }
+
+  /* idle placeholder */
+  .idle-wrap {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 16px;
+    padding: 40px;
+  }
+  .idle-icon {
+    width: 72px; height: 72px; border-radius: 50%;
+    border: 1.5px dashed var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-3);
+  }
+  .idle-wrap h3 {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+    letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600;
+  }
+  .idle-wrap p { max-width: 42ch; color: var(--ink-1); font-size: 13px; line-height: 1.6; }
+
+  /* upload wrap */
+  .upload-wrap {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 22px;
+    padding: 40px;
+  }
+  .upload-wrap .tag {
+    font-family: var(--ff-mono); font-size: 11px; color: var(--acc);
+    letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .upload-wrap .tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); animation: pulse 1.4s infinite; }
+  .upload-panel { width: 100%; max-width: 460px; }
+  .upload-top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--ff-mono); font-size: 12px;
+    color: var(--ink-1); margin-bottom: 10px;
+  }
+  .upload-top .pct { font-size: 28px; font-weight: 600; color: var(--ink-0); letter-spacing: -0.02em; font-family: var(--ff-sans); }
+  .upload-top .bytes { color: var(--ink-2); }
+  .upload-bar {
+    height: 6px; background: var(--bg-2); border-radius: 3px; overflow: hidden; border: 1px solid var(--line);
+  }
+  .upload-bar span {
+    display: block; height: 100%; background: var(--acc);
+    box-shadow: 0 0 12px rgba(var(--acc-rgb),0.5);
+  }
+  .upload-eta {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: 0.08em; margin-top: 10px; text-align: right;
+  }
+  .upload-wrap p { color: var(--ink-2); font-size: 12px; max-width: 42ch; }
+
+  /* rejoin panel */
+  .rejoin-wrap {
+    flex: 1;
+    display: flex; flex-direction: column; justify-content: flex-start; gap: 16px;
+  }
+  .rejoin-card {
+    background: var(--bg-1);
+    border: 1px solid var(--warn-line);
+    border-radius: var(--r-md);
+    padding: 22px 24px;
+    box-shadow: 0 0 40px rgba(var(--warn-rgb),0.06);
+  }
+  .rejoin-card .head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+    font-family: var(--ff-mono); font-size: 10px; color: var(--warn);
+    letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600;
+  }
+  .rejoin-card .head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); animation: pulse 1.4s infinite; }
+  .rejoin-card h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .rejoin-card .desc { color: var(--ink-1); font-size: 13px; margin-bottom: 18px; line-height: 1.55; }
+  .rejoin-meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 8px 16px;
+    padding: 14px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+  }
+  .rejoin-meta dt {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-3);
+    letter-spacing: 0.08em; text-transform: uppercase; padding-top: 2px;
+  }
+  .rejoin-meta dd { color: var(--ink-0); font-size: 13px; font-family: var(--ff-mono); }
+  .rejoin-meta dd .sub { color: var(--ink-3); margin-left: 6px; }
+  .rejoin-note {
+    margin-top: 12px; color: var(--ink-3); font-size: 12px; text-align: center;
+  }
+
+  /* token legend */
+  .token-legend {
+    display: flex; flex-wrap: wrap; gap: 14px 24px;
+    font-family: var(--ff-mono); font-size: 11px; color: var(--ink-2);
+    padding: 16px 20px; margin: 0 48px 48px;
+    background: var(--bg-1); border-radius: 8px; border: 1px solid var(--line);
+  }
+  .token-legend .row { display: flex; align-items: center; gap: 6px; }
+  .token-legend .chip { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.06); }
+  .token-legend b { color: var(--ink-1); font-weight: 500; }
+
+  /* footer */
+  .canvas-foot {
+    padding: 32px 48px 56px;
+    border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 40px;
+  }
+  .canvas-foot h3 {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-2);
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .canvas-foot ul { list-style: none; color: var(--ink-1); font-size: 13px; line-height: 1.7; }
+  .canvas-foot ul li::before { content: '—  '; color: var(--ink-3); }
+  .canvas-foot code {
+    font-family: var(--ff-mono); font-size: 11px;
+    background: var(--bg-2); padding: 1px 6px; border-radius: 3px;
+    color: var(--acc); border: 1px solid var(--line);
+  }
+
+  /* ============ BUTTON VARIANTS SPEC ============ */
+  .variants-row {
+    margin: 0 48px 56px;
+    padding: 20px 24px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: grid;
+    grid-template-columns: 160px repeat(4, 1fr);
+    gap: 16px;
+    align-items: center;
+  }
+  .variants-row .hd {
+    font-family: var(--ff-mono); font-size: 10px; color: var(--ink-2);
+    letter-spacing: 0.12em; text-transform: uppercase; font-weight: 500;
+    line-height: 1.5;
+  }
+  .variants-row .hd b { color: var(--ink-0); font-weight: 600; display: block; font-size: 13px; letter-spacing: -0.01em; text-transform: none; font-family: var(--ff-sans); margin-bottom: 4px; }
+  .variants-cell {
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  }
+  .variants-cell .cap {
+    font-family: var(--ff-mono); font-size: 9px; color: var(--ink-3);
+    letter-spacing: 0.1em; text-transform: uppercase; text-align: center;
+  }
+
+  /* icons (simple inline svg helpers) */
+  .icon { width: 16px; height: 16px; flex-shrink: 0; }
+  .icon-lg { width: 22px; height: 22px; }
+
+  /* prevent flash — hide nothing by default */
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============== CANVAS HEADER ============== -->
+<header class="canvas-head">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div>
+      <h1>Scene Text Translator</h1>
+      <div class="subtitle">mid-fi mockup · all states · dark · a2 layout</div>
+    </div>
+  </div>
+  <div class="canvas-meta">
+    <div>design width <b>1440px</b> · app shell 760h</div>
+    <div>6 states · <b>A2 + first-class log</b></div>
+    <div>slate dark · electric-blue accent</div>
+  </div>
+</header>
+
+<!-- ============== INTRO / TOKEN CARDS ============== -->
+<section class="canvas-intro">
+  <div class="intro-block">
+    <h3>Palette</h3>
+    <p>Slate background, muted electric blue accent, ok/warn/err as narrow exceptions. No gradients except the subtle titlebar shimmer.</p>
+    <div class="swatches">
+      <span class="sw" style="background:var(--bg-0)" title="--bg-0"></span>
+      <span class="sw" style="background:var(--bg-1)" title="--bg-1"></span>
+      <span class="sw" style="background:var(--bg-2)" title="--bg-2"></span>
+      <span class="sw" style="background:var(--bg-3)" title="--bg-3"></span>
+      <span class="sw" style="background:var(--acc)" title="--acc"></span>
+      <span class="sw" style="background:var(--ok)" title="--ok"></span>
+      <span class="sw" style="background:var(--warn)" title="--warn"></span>
+      <span class="sw" style="background:var(--err)" title="--err"></span>
+    </div>
+  </div>
+  <div class="intro-block">
+    <h3>Type</h3>
+    <p>Inter 14/500 body, 17/600 section titles, -0.01em tracking. <span class="mono">JetBrains Mono 11–12</span> for timestamps, file meta, log, labels.</p>
+  </div>
+  <div class="intro-block">
+    <h3>Structure</h3>
+    <p>Fixed 2-column: left <b>400px</b> (input + languages + submit), right flexes (progress · result · error · decision). Never resizes.</p>
+  </div>
+  <div class="intro-block">
+    <h3>Behavior</h3>
+    <p>Right column <b>swaps its body</b> per state. Stage bar + log appear only when the pipeline is actually running on the server.</p>
+  </div>
+</section>
+
+<!-- ============== SUBMIT BUTTON · VARIANTS ============== -->
+<div class="variants-row">
+  <div class="hd">
+    <b>Submit button</b>
+    4 visual states · left-column CTA
+  </div>
+  <div class="variants-cell">
+    <button class="btn primary">Start translation</button>
+    <span class="cap">ACTIVE · ready</span>
+  </div>
+  <div class="variants-cell">
+    <button class="btn primary" style="background:var(--acc-hi); box-shadow: 0 0 0 1px var(--acc-hi) inset, 0 0 24px rgba(var(--acc-rgb),0.4);">Start translation</button>
+    <span class="cap">HOVER / FOCUS</span>
+  </div>
+  <div class="variants-cell">
+    <button class="btn primary disabled">Start translation</button>
+    <span class="cap">DISABLED · no file</span>
+  </div>
+  <div class="variants-cell">
+    <button class="btn primary running">Uploading… 64%</button>
+    <span class="cap">RUNNING · locked</span>
+  </div>
+</div>
+
+<!-- ============== STATE 1 · IDLE ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">01 · IDLE</span>
+    <h2>No file · no job</h2>
+  </div>
+  <div class="note">Empty default. Drop zone fills the left column. Right column shows a passive placeholder — stage bar and log are hidden because the pipeline hasn't been invoked.</div>
+</div>
+<div class="stage-frame" id="state-idle">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot idle"></span> <span>no job</span></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge">EMPTY</span></div>
+        <div class="drop">
+          <div class="ic"><svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg></div>
+          <h4>Drop video here</h4>
+          <div class="sub">or click to pick · MP4 / MOV / WebM / AVI</div>
+          <div class="tiny">≤ 200 MB · ONE FILE · DESKTOP ONLY</div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap" title="swap"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn primary disabled">Start translation</button>
+          <div class="submit-hint"><span>PICK A FILE TO ENABLE</span><span><span class="kbd">⌘</span> <span class="kbd">↵</span></span></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>READY WHEN YOU ARE</span><span class="badge">IDLE</span></div>
+        </div>
+        <div class="idle-wrap">
+          <div class="idle-icon"><svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg></div>
+          <h3>WAITING FOR A JOB</h3>
+          <p>Pick a file and hit <b>Start translation</b> on the left. Stages, log, and the result will all appear in this window.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATE 2 · UPLOADING ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">02 · UPLOADING</span>
+    <h2>File in transit</h2>
+  </div>
+  <div class="note">Client-side progress only. Server hasn't received the file, so no stages, no log, no ETA heuristic. Left column shows the video card already (we have the file locally) with submit text reflecting upload %.</div>
+</div>
+<div class="stage-frame" id="state-uploading">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot warn"></span> <span>uploading <b>64%</b></span></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge warn">BUSY</span></div>
+        <div class="video-card">
+          <div class="video-frame">
+            <img src="assets/still-en.png" alt="input preview">
+            <div class="corner-tag">INPUT</div>
+            <span class="replace"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/></svg>replace</span>
+            <div class="play"><div class="play-btn"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M7 4v16l13-8z"/></svg></div></div>
+          </div>
+          <div class="scrubber">
+            <span>0:00</span>
+            <div class="scrub-track"><div class="fill" style="width:0%"></div><div class="dot" style="left:0%"></div></div>
+            <span>1:03</span>
+          </div>
+          <div class="video-meta"><span>interview_cut_v3.mp4</span><span>142.6 MB · 30 fps · 1080×1920</span></div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn primary running">Uploading… 64%</button>
+          <div class="submit-hint"><span>FORM LOCKED WHILE UPLOADING</span><span></span></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>UPLOADING</span><span class="badge warn">CLIENT → SERVER</span></div>
+        </div>
+        <div class="upload-wrap">
+          <div class="tag"><span class="dot"></span> UPLOADING TO SERVER</div>
+          <div class="upload-panel">
+            <div class="upload-top"><span class="pct">64%</span><span class="bytes">91.2 / 142.6 MB · 8.4 MB/s</span></div>
+            <div class="upload-bar"><span style="width:64%"></span></div>
+            <div class="upload-eta">~ 6s remaining</div>
+          </div>
+          <p>Pipeline will start once the server finishes receiving the file. Stages, log, and ETA appear then.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATE 3 · RUNNING ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">03 · RUNNING</span>
+    <h2>Pipeline live · Stage 3 of 5</h2>
+  </div>
+  <div class="note">Stage bar reads left-to-right. S1/S2 done (✓ + duration), S3 pulsing, S4/S5 pending. Log is first-class — fills most of the right column. Left shows the source video so presenter can scrub during the slow middle.</div>
+</div>
+<div class="stage-frame" id="state-running">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot"></span> <b>7ca09ebb</b> <span style="color:var(--ink-3)">·</span> <span>S3/5 · 00:42</span></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge warn">LOCKED</span></div>
+        <div class="video-card">
+          <div class="video-frame">
+            <img src="assets/still-en.png" alt="input preview">
+            <div class="corner-tag">INPUT · EN</div>
+            <div class="play"><div class="play-btn"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M7 4v16l13-8z"/></svg></div></div>
+          </div>
+          <div class="scrubber">
+            <span>0:14</span>
+            <div class="scrub-track"><div class="fill" style="width:22%"></div><div class="dot" style="left:22%"></div></div>
+            <span>1:03</span>
+          </div>
+          <div class="video-meta"><span>interview_cut_v3.mp4</span><span>142.6 MB · 30 fps · 1080×1920</span></div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select" style="opacity:0.7; cursor:not-allowed;"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap" style="opacity:0.4; cursor:not-allowed;"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select" style="opacity:0.7; cursor:not-allowed;"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+          <div class="lang-valid" style="color:var(--ink-3)">● LOCKED WHILE RUNNING</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn primary running">Job running…</button>
+          <div class="submit-hint"><span>UNLOCKS ON DONE / FAILED</span><span></span></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>PIPELINE · ONE WINDOW</span><span class="badge acc"><span style="color:var(--acc)">●</span> LIVE</span></div>
+        </div>
+        <div class="stages">
+          <div class="stage done"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+          <div class="stage done"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+          <div class="stage active"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">32s</div></div>
+          <div class="stage"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+          <div class="stage"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+        </div>
+        <div class="elapsed">
+          <span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:12px;height:12px;vertical-align:-2px;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> elapsed <b>00:42</b></span>
+          <span>· est. remaining <b>~1:10</b> <span style="color:var(--ink-3)">(heuristic)</span></span>
+          <div class="meter stripe"><span style="width:40%"></span></div>
+        </div>
+        <div class="log-box">
+          <div class="log-head"><h4>Live log</h4><span class="meta-tag">SSE · 3 SEVERITIES</span></div>
+          <div class="log">
+<div><span class="t">[22:30:12]</span> <span class="lv i">INFO</span> Loading video: …/7ca09ebb/1-origin.mp4</div>
+<div><span class="t">[22:30:13]</span> <span class="lv i">INFO</span> Loaded 178 frames (30.0 fps, 1080×1920)</div>
+<div class="hdr"><span class="t">[22:30:13]</span> <span class="lv i">INFO</span> ═══ Stage 1: Detection &amp; Selection ═══</div>
+<div><span class="t">[22:30:15]</span> <span class="lv i">INFO</span> S1: running DBNet++ on 178 frames…</div>
+<div><span class="t">[22:30:17]</span> <span class="lv i">INFO</span> S1: 4 text regions detected · 4.2s</div>
+<div class="hdr"><span class="t">[22:30:17]</span> <span class="lv i">INFO</span> ═══ Stage 2: Frontalize ═══</div>
+<div><span class="t">[22:30:19]</span> <span class="lv i">INFO</span> S2: homography estimated for region 1/4</div>
+<div><span class="t">[22:30:20]</span> <span class="lv i">INFO</span> S2: homography estimated for region 2/4</div>
+<div><span class="t">[22:30:21]</span> <span class="lv i">INFO</span> S2: homography estimated for region 3/4</div>
+<div><span class="t">[22:30:22]</span> <span class="lv i">INFO</span> S2: homography estimated for region 4/4</div>
+<div><span class="t">[22:30:23]</span> <span class="lv i">INFO</span> S2: done · 4 crops written · 6.1s</div>
+<div class="hdr"><span class="t">[22:30:23]</span> <span class="lv i">INFO</span> ═══ Stage 3: Edit (AI model) ═══</div>
+<div><span class="t">[22:30:24]</span> <span class="lv i">INFO</span> S3: loading diffusion edit model… (cold)</div>
+<div><span class="t">[22:30:41]</span> <span class="lv w">WARN</span> S3: model warmup exceeded 15s · proceeding</div>
+<div><span class="t">[22:30:47]</span> <span class="lv i">INFO</span> S3: region 1/4 rewritten → "CAFÉ"</div>
+<div><span class="t">[22:30:54]</span> <span class="lv i">INFO</span> S3: region 2/4 rewritten → "CAFÉ · TÉ · PASTELES"<span class="cur"></span></div>
+<div class="dim">··· silence is OK. Stage 3 can pause for minutes while the model runs ···</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATE 4 · SUCCEEDED ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">04 · SUCCEEDED</span>
+    <h2>Result ready · same window</h2>
+  </div>
+  <div class="note">Stage bar becomes a timeline — all ✓, durations readable. Right column now shows the translated output (with a before/after toggle). Left column unlocks — submit becomes "Submit another" and a delete link appears.</div>
+</div>
+<div class="stage-frame" id="state-succeeded">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot ok"></span> <b>7ca09ebb</b> <span style="color:var(--ink-3)">·</span> <span>done · 2:08</span></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge">LOCKED</span></div>
+        <div class="video-card">
+          <div class="video-frame">
+            <img src="assets/still-en.png" alt="input preview">
+            <div class="corner-tag">INPUT · EN</div>
+            <div class="play"><div class="play-btn"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M7 4v16l13-8z"/></svg></div></div>
+          </div>
+          <div class="scrubber">
+            <span>0:00</span>
+            <div class="scrub-track"><div class="fill" style="width:0%"></div><div class="dot" style="left:0%"></div></div>
+            <span>1:03</span>
+          </div>
+          <div class="video-meta"><span>interview_cut_v3.mp4</span><span>142.6 MB · 30 fps · 1080×1920</span></div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select" style="opacity:0.7;"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap" style="opacity:0.4;"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select" style="opacity:0.7;"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+          <div class="lang-valid" style="color:var(--ink-3)">● LOCKED · JOB COMPLETE</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn ghost">Submit another</button>
+          <div class="submit-hint"><span>START A NEW JOB</span><a href="#">✗ delete job</a></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>RESULT · SAME WINDOW</span><span class="badge ok">READY</span></div>
+        </div>
+        <div class="stages">
+          <div class="stage done"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+          <div class="stage done"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+          <div class="stage done"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">1:32</div></div>
+          <div class="stage done"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">12s</div></div>
+          <div class="stage done"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">3.1s</div></div>
+        </div>
+        <div class="elapsed">
+          <span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:12px;height:12px;vertical-align:-2px;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> total <b>2:08</b></span>
+          <span>· 5 stages <span style="color:var(--ok)">✓</span> · 4 regions rewritten</span>
+          <div class="meter"><span style="width:100%"></span></div>
+        </div>
+        <div class="result-wrap">
+          <div class="result-video">
+            <img src="assets/still-es.png" alt="translated result">
+            <div class="corner-tag">OUTPUT · ES</div>
+          </div>
+          <div class="result-actions">
+            <button class="btn success" style="flex:1;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+              Download translated.mp4
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATE 5 · FAILED ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">05 · FAILED</span>
+    <h2>Pipeline crashed · Stage 3</h2>
+  </div>
+  <div class="note">S3 gets the failure treatment (red ✗), S4/S5 stay pending (they never ran). Right column swaps to a dedicated error card with collapsible traceback. Left unlocks for retry.</div>
+</div>
+<div class="stage-frame" id="state-failed">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot err"></span> <b>7ca09ebb</b> <span style="color:var(--ink-3)">·</span> <span style="color:var(--err)">failed · S3</span></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge">LOCKED</span></div>
+        <div class="video-card">
+          <div class="video-frame">
+            <img src="assets/still-en.png" alt="input preview">
+            <div class="corner-tag">INPUT · EN</div>
+            <div class="play"><div class="play-btn"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M7 4v16l13-8z"/></svg></div></div>
+          </div>
+          <div class="scrubber">
+            <span>0:14</span>
+            <div class="scrub-track"><div class="fill" style="width:22%"></div><div class="dot" style="left:22%"></div></div>
+            <span>1:03</span>
+          </div>
+          <div class="video-meta"><span>interview_cut_v3.mp4</span><span>142.6 MB · 30 fps · 1080×1920</span></div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select" style="opacity:0.7;"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap" style="opacity:0.4;"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select" style="opacity:0.7;"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+          <div class="lang-valid" style="color:var(--err)">● JOB FAILED · RETRY OR RESUBMIT</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn ghost">Submit another</button>
+          <div class="submit-hint"><span>PICK A NEW FILE, OR RETRY</span><a href="#">✗ delete job</a></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>FAILURE · SAME WINDOW</span><span class="badge err">● ERR</span></div>
+        </div>
+        <div class="stages">
+          <div class="stage done"><div class="no">S1</div><div class="nm">Detect</div><div class="dur">4.2s</div></div>
+          <div class="stage done"><div class="no">S2</div><div class="nm">Frontalize</div><div class="dur">6.1s</div></div>
+          <div class="stage fail"><div class="no">S3</div><div class="nm">Edit</div><div class="dur">8s</div></div>
+          <div class="stage"><div class="no">S4</div><div class="nm">Propagate</div><div class="dur">—</div></div>
+          <div class="stage"><div class="no">S5</div><div class="nm">Revert</div><div class="dur">—</div></div>
+        </div>
+        <div class="elapsed">
+          <span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:12px;height:12px;vertical-align:-2px;"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> elapsed <b style="color:var(--err)">00:18</b></span>
+          <span>· crashed at Stage 3 of 5</span>
+          <div class="meter"><span style="width:24%; background:var(--err)"></span></div>
+        </div>
+        <div class="fail-wrap">
+          <div class="fail-card">
+            <div class="fail-label">● PIPELINE CRASHED</div>
+            <h3>CUDA out of memory at Stage 3</h3>
+            <div class="fail-desc">Tried to allocate 2.3 GiB on a GPU that had 1.8 GiB free. Another process may be holding memory, or the edit model is too large for this GPU.</div>
+            <details open>
+              <summary>▾ show traceback</summary>
+              <pre>Traceback (most recent call last):
+  File "pipeline/edit.py", line 88, in rewrite
+    out = model.generate(cropped, lang_pair=('en','es'))
+  File "models/diffusion.py", line 212, in generate
+    latent = self.encode(x)
+  File "models/vae.py", line 44, in encode
+    return self.encoder(x.to(self.device))
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.30 GiB.
+GPU 0 has a total capacity of 8.00 GiB of which 1.80 GiB is free.</pre>
+            </details>
+            <div class="fail-actions" style="margin-top:10px;">
+              <button class="btn ghost" style="border-color:var(--err-line); color:var(--err);">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><path d="M21 3v5h-5"/></svg>
+                Retry
+              </button>
+              <button class="btn ghost">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy error
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATE 6 · REJOIN ============== -->
+<div class="section-head">
+  <div>
+    <span class="n">06 · REJOIN</span>
+    <h2>Server busy · 409 response</h2>
+  </div>
+  <div class="note">Another user's job is running. Right column becomes a pure decision surface at the top — metadata of the running job + a single "Rejoin" button. No log or stage telemetry until the user opts in. Left's submit shows "Waiting for server…".</div>
+</div>
+<div class="stage-frame" id="state-rejoin">
+  <div class="app">
+    <div class="titlebar">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <span class="title">scene-text-translator · localhost:7860</span>
+      <span class="spacer"></span>
+      <span class="job-chip"><span class="dot warn"></span> <span style="color:var(--warn)">server busy</span> <span style="color:var(--ink-3)">·</span> <b>7ca09ebb</b></span>
+    </div>
+    <div class="main">
+      <div class="col left">
+        <div class="identity">
+          <div class="label">IDENTITY</div>
+          <h2>Scene Text Translator</h2>
+          <p>Replace on-screen text across languages.</p>
+        </div>
+        <div class="label">INPUT <span class="badge err">BLOCKED</span></div>
+        <div class="video-card">
+          <div class="video-frame">
+            <img src="assets/still-en.png" alt="your queued input">
+            <div class="corner-tag">YOUR INPUT · QUEUED</div>
+            <div class="play"><div class="play-btn"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M7 4v16l13-8z"/></svg></div></div>
+          </div>
+          <div class="scrubber">
+            <span>0:00</span>
+            <div class="scrub-track"><div class="fill" style="width:0%"></div><div class="dot" style="left:0%"></div></div>
+            <span>1:03</span>
+          </div>
+          <div class="video-meta"><span>interview_cut_v3.mp4</span><span>142.6 MB · LOCAL · NOT UPLOADED</span></div>
+        </div>
+        <div class="label">LANGUAGES</div>
+        <div class="lang-box">
+          <div class="lang-row">
+            <div class="lang-select"><span><span class="name">English</span></span><span class="caret">▾</span></div>
+            <div class="swap"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg></div>
+            <div class="lang-select"><span><span class="name">Spanish</span></span><span class="caret">▾</span></div>
+          </div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="submit-bar">
+          <button class="btn primary disabled">Waiting for server…</button>
+          <div class="submit-hint"><span>SERVER HAS ANOTHER JOB</span><span></span></div>
+        </div>
+      </div>
+      <div class="col right">
+        <div class="right-head">
+          <div class="label"><span>ACTION REQUIRED</span><span class="badge warn">● BLOCKED</span></div>
+        </div>
+        <div class="rejoin-wrap">
+          <div class="rejoin-card">
+            <div class="head"><span class="dot"></span> ANOTHER JOB IS RUNNING</div>
+            <h3>Server is busy</h3>
+            <div class="desc">Only one job at a time on this server. Your file hasn't been uploaded — it's waiting locally. Watch the running job finish, then your job can start.</div>
+            <dl class="rejoin-meta">
+              <dt>running job</dt><dd>7ca09ebb<span class="sub">from other session</span></dd>
+              <dt>stage</dt><dd>S3 · Edit<span class="sub">of 5</span></dd>
+              <dt>started</dt><dd>22:30:12<span class="sub">· 00:42 ago</span></dd>
+              <dt>est. remaining</dt><dd>~1:10<span class="sub">(heuristic)</span></dd>
+            </dl>
+            <button class="btn primary" style="width:100%;">
+              Rejoin running job
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </button>
+            <div class="rejoin-note">or wait for the server to free up · your file stays queued</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== TOKEN LEGEND ============== -->
+<div class="token-legend">
+  <div class="row"><span class="chip" style="background:var(--bg-0)"></span><b>--bg-0</b> page</div>
+  <div class="row"><span class="chip" style="background:var(--bg-1)"></span><b>--bg-1</b> panel</div>
+  <div class="row"><span class="chip" style="background:var(--bg-2)"></span><b>--bg-2</b> raised</div>
+  <div class="row"><span class="chip" style="background:var(--bg-3)"></span><b>--bg-3</b> field</div>
+  <div class="row"><span class="chip" style="background:var(--line)"></span><b>--line</b> divider</div>
+  <div class="row"><span class="chip" style="background:var(--ink-0)"></span><b>--ink-0</b> primary</div>
+  <div class="row"><span class="chip" style="background:var(--ink-1)"></span><b>--ink-1</b> secondary</div>
+  <div class="row"><span class="chip" style="background:var(--ink-2)"></span><b>--ink-2</b> tertiary</div>
+  <div class="row"><span class="chip" style="background:var(--acc)"></span><b>--acc</b> accent</div>
+  <div class="row"><span class="chip" style="background:var(--ok)"></span><b>--ok</b></div>
+  <div class="row"><span class="chip" style="background:var(--warn)"></span><b>--warn</b></div>
+  <div class="row"><span class="chip" style="background:var(--err)"></span><b>--err</b></div>
+</div>
+
+<!-- ============== SPEC FOOTER ============== -->
+<footer class="canvas-foot">
+  <div>
+    <h3>Coding handoff — what to lift</h3>
+    <ul>
+      <li>CSS tokens at the top of this file → drop straight into <code>tokens.css</code></li>
+      <li>6 states = 6 values of a <code>pipelineState</code> enum → switch in right column body</li>
+      <li>Stage bar is a single component fed by an array of <code>{name, status, duration}</code> — status ∈ <code>done | active | pending | fail</code></li>
+      <li>Log is append-only with 3 severity classes: <code>.i</code> / <code>.w</code> / <code>.e</code>, plus <code>.hdr</code> for stage headers and <code>.dim</code> for meta lines</li>
+      <li>Left column never changes structure — only <code>disabled</code> states and submit-button label/variant change</li>
+    </ul>
+  </div>
+  <div>
+    <h3>State transition rules</h3>
+    <ul>
+      <li><code>idle</code> → <code>uploading</code> on submit with file</li>
+      <li><code>uploading</code> → <code>running</code> on 200 from POST · or → <code>rejoin</code> on 409</li>
+      <li><code>running</code> → <code>succeeded</code> on SSE <code>job.complete</code></li>
+      <li><code>running</code> → <code>failed</code> on SSE <code>job.error</code></li>
+      <li><code>rejoin</code> → <code>running</code> when user clicks "Rejoin" (SSE subscribes to the other job)</li>
+      <li><code>succeeded</code> / <code>failed</code> → <code>idle</code> on "Submit another" or "delete job"</li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>

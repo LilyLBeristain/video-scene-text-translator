@@ -10,6 +10,23 @@ from src.data_types import TextTrack
 logger = logging.getLogger(__name__)
 
 
+# MyMemoryTranslator requires full locale codes (e.g. "en-GB", "es-ES") while
+# GoogleTranslator accepts the short forms we use everywhere else. Map short →
+# locale on MyMemory fallback so the two backends stay interchangeable.
+# Entries are short → MyMemory locale code EXCEPT "zh-CN" which is already the
+# canonical MyMemory locale (not a short form). New Chinese variants (zh-TW,
+# zh-HK, …) need an explicit entry here — they won't auto-expand.
+_MYMEMORY_LOCALE: dict[str, str] = {
+    "en": "en-GB",
+    "es": "es-ES",
+    "zh-CN": "zh-CN",
+    "fr": "fr-FR",
+    "de": "de-DE",
+    "ja": "ja-JP",
+    "ko": "ko-KR",
+}
+
+
 class ReferenceSelector:
     """Selects reference frames and handles text translation."""
 
@@ -66,7 +83,9 @@ class ReferenceSelector:
                 text,
                 exc,
             )
-            return MyMemoryTranslator(source=src, target=tgt).translate(text)
+            my_src = _MYMEMORY_LOCALE.get(src, src)
+            my_tgt = _MYMEMORY_LOCALE.get(tgt, tgt)
+            return MyMemoryTranslator(source=my_src, target=my_tgt).translate(text)
 
     def select_reference_frames(
         self,

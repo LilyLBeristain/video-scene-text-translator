@@ -54,3 +54,9 @@ third_party/co-tracker/
 third_party/SRNet/
 third_party/lama/
 third_party/Hi-SAM/
+
+# Server-side job storage (uploads, outputs) — D7
+server/storage/
+
+# Built frontend bundle copied into FastAPI's static mount — generated, not tracked
+server/app/static/
