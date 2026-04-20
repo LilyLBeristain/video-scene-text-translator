@@ -47,6 +47,9 @@ detection:
   use_kalman_smoothing: false
   use_ema_smoothing: false
   cotracker_grid_size: 7
+  ref_min_bbox_area: 500.0
+  ref_max_aspect_ratio: 8.0
+  ref_keep_top_n: 10
 
 translation:
   source_lang: "en"
@@ -124,8 +127,8 @@ revert:
   refiner_rejection_warn_threshold: 0.1
   temporal_smooth_window: 5
   temporal_smooth_sigma: 10
-  pre_inpaint: true
-  pre_inpaint_expansion: 0.15   # 15% expansion from centroid
+  pre_inpaint: false
+  pre_inpaint_expansion: 0.02   # 15% expansion from centroid
   # Pre-inpaint backend: "srnet" or "hisam". Independent from
   # propagation.inpainter_backend — S4 and S5 can use different backends
   # (e.g. SRNet in S4, Hi-SAM in S5) or different checkpoints.
