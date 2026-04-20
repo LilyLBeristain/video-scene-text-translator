@@ -35,6 +35,7 @@ test in test_s5_revert.py.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import cv2
@@ -98,6 +99,11 @@ class RefinerInference:
         # Cached center-weight masks keyed by (H, W) — same canonical size
         # repeats across many detections of one track, so caching is cheap.
         self._center_weight_cache: dict[tuple[int, int], np.ndarray] = {}
+        # Remember the first load failure so subsequent calls re-raise
+        # without retrying torch.load. Without this, a missing or corrupt
+        # checkpoint gets re-attempted (and re-logged) once per call —
+        # hundreds of times per run on a non-trivial video.
+        self._load_error: BaseException | None = None
 
     # ------------------------------------------------------------------
     # Lazy load
@@ -106,6 +112,11 @@ class RefinerInference:
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return
+        # Fast-fail on a previously-seen load error rather than hammering
+        # torch.load again — callers' swallow-and-fall-back paths still fire,
+        # but we skip the I/O + log every time.
+        if self._load_error is not None:
+            raise self._load_error
 
         import torch  # local import so module-level loads don't need torch
 
@@ -120,8 +131,29 @@ class RefinerInference:
             device_str = "cpu"
         device = torch.device(device_str)
 
-        ckpt = torch.load(
-            self.checkpoint_path, map_location=device, weights_only=False,
+        # Wrap torch.load so a slow/stuck checkpoint read is visible. This
+        # is a one-shot first-call blocker — e.g. a cold disk read on a
+        # large .pt file can silently consume tens of seconds with no
+        # other signal. Re-raise so the normal load-failure path fires.
+        t_load_start = time.monotonic()
+        try:
+            ckpt = torch.load(
+                self.checkpoint_path, map_location=device, weights_only=False,
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - t_load_start
+            logger.exception(
+                "S5 refiner: torch.load(%s) failed after %.1fs",
+                self.checkpoint_path, elapsed,
+            )
+            # Remember this exception so future _ensure_loaded() calls
+            # short-circuit without retrying torch.load (avoids the 144×
+            # retry flood we observed under the web server).
+            self._load_error = exc
+            raise
+        logger.info(
+            "S5 refiner: loaded %s in %.1fs",
+            self.checkpoint_path, time.monotonic() - t_load_start,
         )
         cfg = ckpt.get("config", {})
         mc = cfg.get("model", {})
