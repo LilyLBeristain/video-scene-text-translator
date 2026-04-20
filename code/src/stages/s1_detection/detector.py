@@ -48,21 +48,29 @@ class TextDetector:
         from wordfreq import zipf_frequency
 
         filtered = []
-        for det in detections:
-            text = det.text.strip()
-            if len(text) < 2:
-                continue
-            if text.isdigit():
-                continue
-            if self.config.word_whitelist is not None:
-                words = text.lower().split()
-                if not all(w in self.config.word_whitelist for w in words):
-                    logger.debug("Filtered non-whitelisted text: %r", text)
+        if self.config.ocr_languages[0].startswith("ch"):
+            # For chinese, only filter out digits
+            for det in detections:
+                text = det.text.strip()
+                if text.isdigit():
                     continue
-            elif not self._is_plausible_text(text, zipf_frequency):
-                logger.debug("Filtered gibberish text: %r", text)
-                continue
-            filtered.append(det)
+                filtered.append(det)
+        else:
+            for det in detections:
+                text = det.text.strip()
+                if len(text) < 2:
+                    continue
+                if text.isdigit():
+                    continue
+                if self.config.word_whitelist is not None:
+                    words = text.lower().split()
+                    if not all(w in self.config.word_whitelist for w in words):
+                        logger.debug("Filtered non-whitelisted text: %r", text)
+                        continue
+                elif not self._is_plausible_text(text, zipf_frequency):
+                    logger.debug("Filtered gibberish text: %r", text)
+                    continue
+                filtered.append(det)
         return filtered
 
     @staticmethod

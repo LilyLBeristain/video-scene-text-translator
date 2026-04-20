@@ -91,6 +91,14 @@ class DetectionStage:
         # Filter duplicate / sub-region tracks after gap-filling so every
         # track has quads on every frame for proper spatial overlap tests.
         tracks = self.tracker.filter_duplicate_tracks(tracks)
+        # Reference-frame size/aspect filters run after duplicate
+        # suppression — by this point each surviving track has a stable
+        # reference detection we can measure. The top-N cap runs last
+        # so it picks among the tracks that already passed the hard
+        # size/aspect thresholds.
+        tracks = self.tracker.filter_tracks_by_reference_size(tracks)
+        tracks = self.tracker.filter_tracks_by_reference_aspect_ratio(tracks)
+        tracks = self.tracker.filter_tracks_by_top_n_size(tracks)
 
         logger.info("S1: Found %d text tracks", len(tracks))
         return tracks

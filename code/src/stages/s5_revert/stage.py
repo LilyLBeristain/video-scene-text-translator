@@ -182,6 +182,7 @@ class RevertStage:
         warped_roi: np.ndarray,
         warped_alpha: np.ndarray,
         target_bbox: BBox,
+        src_center: tuple[int, int] | None = None,
         flags: int = cv2.NORMAL_CLONE,
     ) -> np.ndarray:
         """Composite the warped ROI into the frame using cv2.seamlessClone.
@@ -192,6 +193,15 @@ class RevertStage:
         Relies on the bbox expansion in `warp_roi_to_frame` to guarantee a
         zero-alpha border so the mask stays strictly interior (a hard
         requirement of cv2.seamlessClone).
+
+        ``src_center``: paste location in frame-space (integer pixel). When
+        supplied, it overrides the default ``bbox.x + bbox.width//2``
+        fallback. Callers should prefer a center derived from the
+        float-precision effective frame corners rounded once: computing it
+        from ``target_bbox`` applies two rounding steps (once for the
+        bbox origin, once for the half-width) that can disagree by 1 px
+        across frames and produce visible seamlessClone jitter even when
+        the underlying quad is still.
         """
         # Binarize the feathered alpha into a clone mask.
         mask = (warped_alpha > 0).astype(np.uint8) * 255
@@ -200,11 +210,13 @@ class RevertStage:
 
         src = warped_roi
 
-        # Center of the bbox in destination (frame) coordinates.
-        center = (
-            target_bbox.x + target_bbox.width // 2,
-            target_bbox.y + target_bbox.height // 2,
-        )
+        if src_center is None:
+            center = (
+                target_bbox.x + target_bbox.width // 2,
+                target_bbox.y + target_bbox.height // 2,
+            )
+        else:
+            center = src_center
 
         # seamlessClone requires the source (centered at `center`) to lie
         # entirely within the destination. Bail out to alpha blending if not.
@@ -267,6 +279,27 @@ class RevertStage:
     # ------------------------------------------------------------------
     # Temporal corner smoothing
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _seamless_center_from_corners(
+        corners: np.ndarray,
+    ) -> tuple[int, int]:
+        """Round-once bbox-midpoint center from float frame-space corners.
+
+        The default seamlessClone center in ``composite_roi_into_frame_seamless``
+        is ``bbox.x + bbox.width // 2``. Since ``bbox.x`` and ``bbox.width``
+        are each independently ``int(round(...))`` of the floating-point
+        quad, the two roundings can disagree by ±1 px across frames even
+        when the underlying float midpoint is essentially still — that
+        manifests as seamlessClone seed-pixel jitter, which in turn shifts
+        the Poisson-blended composite by a pixel frame to frame. Rounding
+        the float midpoint once removes that amplification.
+        """
+        xs = corners[:, 0]
+        ys = corners[:, 1]
+        cx = (float(xs.min()) + float(xs.max())) / 2.0
+        cy = (float(ys.min()) + float(ys.max())) / 2.0
+        return (int(round(cx)), int(round(cy)))
 
     @staticmethod
     def _project_canonical_to_frame(
@@ -349,6 +382,50 @@ class RevertStage:
         expanded = centroid + (1.0 + ratio) * (corners - centroid)
         return expanded.astype(np.float32)
 
+    @staticmethod
+    def _shrink_quad_to_centroid(
+        corners: np.ndarray, shrink_px: float,
+    ) -> np.ndarray:
+        """Move each corner of a (4, 2) quad ``shrink_px`` toward the centroid.
+
+        Unlike ``_expand_quad_from_centroid`` which scales by a ratio,
+        this shrink is expressed in pixels — it replaces the pre-fix
+        5×5 ``cv2.erode`` step, which buffered the boundary by a
+        constant pixel margin regardless of quad size.
+        """
+        centroid = corners.mean(axis=0)
+        vecs = centroid - corners  # (4, 2) from each corner toward center
+        dists = np.linalg.norm(vecs, axis=1, keepdims=True)
+        unit = vecs / np.maximum(dists, 1e-6)
+        return (corners + shrink_px * unit).astype(np.float32)
+
+    @staticmethod
+    def _build_antialiased_mask(
+        corners: np.ndarray,
+        shape: tuple[int, int],
+    ) -> np.ndarray:
+        """Rasterise a (4, 2) quad to a grayscale mask with sub-pixel AA edges.
+
+        ``shape``: ``(H, W)`` of the returned mask. Returns ``(H, W)``
+        uint8 with values in ``[0, 255]``.
+
+        Uses ``shift=4`` (1/16 px precision) and
+        ``lineType=cv2.LINE_AA`` so sub-pixel quad motion produces a
+        proportional change in the boundary mask values, instead of a
+        1-px jump when int-cast corners cross a pixel grid line. The
+        grayscale output doubles as a soft alpha for blending.
+        """
+        h, w = shape
+        mask = np.zeros((h, w), dtype=np.uint8)
+        shift = 4
+        corners_fixed = np.round(corners * (1 << shift)).astype(np.int32)
+        cv2.fillConvexPoly(
+            mask, corners_fixed, 255,
+            lineType=cv2.LINE_AA,
+            shift=shift,
+        )
+        return mask
+
     def _pre_inpaint_region(
         self,
         frame: np.ndarray,
@@ -411,17 +488,27 @@ class RevertStage:
             flags=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_REPLICATE,
         )
-        # Build a mask from the expanded quad, then erode by a few
-        # pixels to exclude any residual interpolation artifacts at the
-        # very edge of the warped region.
-        mask = np.zeros((frame_h, frame_w), dtype=np.uint8)
-        cv2.fillConvexPoly(mask, expanded.astype(np.int32), 255)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.erode(mask, kernel, iterations=1)
-
-        # Paste inpainted pixels where the mask is nonzero
-        mask_bool = mask > 0
-        frame[mask_bool] = warped_back[mask_bool]
+        # Build a sub-pixel antialiased mask and use it as a soft alpha
+        # for blending inpainted pixels into the frame. Replaces the old
+        # ``fillConvexPoly(int32) + 5×5 erode + boolean paste`` path,
+        # which had two jitter sources:
+        #   1. ``.astype(np.int32)`` quantises each quad corner to the
+        #      pixel grid, so a sub-pixel quad drift that straddles a
+        #      half-integer boundary flipped the rasterised edge by a
+        #      full pixel between frames.
+        #   2. The hard (boolean) paste meant that 1-px edge flip
+        #      exposed any tonal mismatch between the inpainted and
+        #      original backgrounds as a flickering 1-px ring.
+        # Shrinking the expanded quad 2 px inward replaces the 5×5
+        # erode's buffer against BORDER_REPLICATE interpolation leakage
+        # at the warp edge, without destroying the AA gradient.
+        mask_quad = self._shrink_quad_to_centroid(expanded, shrink_px=2.0)
+        mask = self._build_antialiased_mask(mask_quad, (frame_h, frame_w))
+        alpha = (mask.astype(np.float32) / 255.0)[:, :, np.newaxis]
+        frame[:] = (
+            frame.astype(np.float32) * (1.0 - alpha)
+            + warped_back.astype(np.float32) * alpha
+        ).astype(np.uint8)
 
         return frame
 
@@ -751,6 +838,30 @@ class RevertStage:
                         frame, warped_roi, warped_alpha, target_bbox
                     )
                 else:
+                    # Derive the seamlessClone center from the effective
+                    # frame-space corners (post-refiner / post-smoothing)
+                    # rounded once, instead of letting cv2.seamlessClone
+                    # fall back to the int-bbox-based midpoint which
+                    # jitters by 1 px across frames as two independent
+                    # roundings cross half-integer boundaries.
+                    src_center: tuple[int, int] | None = None
+                    if track.canonical_size is not None:
+                        w_can, h_can = track.canonical_size
+                        can_corners = np.array(
+                            [[0, 0], [w_can, 0], [w_can, h_can], [0, h_can]],
+                            dtype=np.float64,
+                        )
+                        if smoothed_H is not None:
+                            eff_corners = self._project_canonical_to_frame(
+                                smoothed_H, can_corners,
+                            )
+                        else:
+                            eff_corners = self._project_canonical_to_frame(
+                                det.H_from_frontal, can_corners, delta_H,
+                            )
+                        src_center = self._seamless_center_from_corners(
+                            eff_corners,
+                        )
                     # Wrap seamlessClone. A numerically bad mask / extreme
                     # warp can trigger cv2.error; log elapsed + context
                     # before re-raising so the existing stage error path
@@ -758,7 +869,8 @@ class RevertStage:
                     t_comp_start = time.monotonic()
                     try:
                         frame = self.composite_roi_into_frame_seamless(
-                            frame, warped_roi, warped_alpha, target_bbox
+                            frame, warped_roi, warped_alpha, target_bbox,
+                            src_center=src_center,
                         )
                     except Exception:
                         elapsed = time.monotonic() - t_comp_start

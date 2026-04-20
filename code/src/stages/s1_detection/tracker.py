@@ -372,6 +372,132 @@ class TextTracker:
         return accepted
 
     # -------------------------
+    # Reference-frame size / aspect filters
+    # -------------------------
+    def filter_tracks_by_reference_size(
+        self,
+        tracks: list[TextTrack],
+    ) -> list[TextTrack]:
+        """Drop tracks whose reference-frame bbox is below ``ref_min_bbox_area``.
+
+        Uses the axis-aligned bbox area (px²) of the reference-frame
+        detection. Tracks without a valid reference frame pass through
+        unchanged — downstream stages already no-op on them, so there's
+        nothing to gain by forcing a drop here.
+        """
+        min_area = self.config.ref_min_bbox_area
+        if min_area <= 0:
+            return tracks
+
+        accepted: list[TextTrack] = []
+        for track in tracks:
+            ref_det = track.detections.get(track.reference_frame_idx)
+            if ref_det is None:
+                accepted.append(track)
+                continue
+            area = ref_det.bbox.area()
+            if area < min_area:
+                logger.info(
+                    "S1: dropping track %d ('%s') — reference bbox area "
+                    "%d px² < min %g",
+                    track.track_id, track.source_text, area, min_area,
+                )
+                continue
+            accepted.append(track)
+
+        n_dropped = len(tracks) - len(accepted)
+        if n_dropped > 0:
+            logger.info(
+                "S1: min-area filter dropped %d / %d tracks",
+                n_dropped, len(tracks),
+            )
+        return accepted
+
+    def filter_tracks_by_reference_aspect_ratio(
+        self,
+        tracks: list[TextTrack],
+    ) -> list[TextTrack]:
+        """Drop tracks whose reference quad exceeds ``ref_max_aspect_ratio``.
+
+        Ratio is ``max(w/h, h/w)`` of the reference quad's average edge
+        lengths — symmetric across 90° rotations so a very tall quad
+        trips the same threshold as a very wide one. Tracks without a
+        valid reference frame pass through unchanged.
+        """
+        max_ratio = self.config.ref_max_aspect_ratio
+        if max_ratio <= 0:
+            return tracks
+
+        accepted: list[TextTrack] = []
+        for track in tracks:
+            ref_det = track.detections.get(track.reference_frame_idx)
+            if ref_det is None:
+                accepted.append(track)
+                continue
+            w_over_h = ref_det.quad.aspect_ratio()
+            ratio = max(w_over_h, 1.0 / max(w_over_h, 1e-6))
+            if ratio > max_ratio:
+                logger.info(
+                    "S1: dropping track %d ('%s') — reference aspect "
+                    "ratio %.2f:1 > max %.2f:1",
+                    track.track_id, track.source_text, ratio, max_ratio,
+                )
+                continue
+            accepted.append(track)
+
+        n_dropped = len(tracks) - len(accepted)
+        if n_dropped > 0:
+            logger.info(
+                "S1: aspect-ratio filter dropped %d / %d tracks",
+                n_dropped, len(tracks),
+            )
+        return accepted
+
+    def filter_tracks_by_top_n_size(
+        self,
+        tracks: list[TextTrack],
+    ) -> list[TextTrack]:
+        """Keep only the N tracks with the largest reference bbox area.
+
+        ``N`` comes from ``ref_keep_top_n``. Tracks without a valid
+        reference detection are ranked last (size 0) — they survive
+        only if fewer than N tracks have a valid reference. Original
+        input order is preserved among the kept tracks. 0 or negative
+        N disables. ``len(tracks) <= N`` short-circuits.
+        """
+        top_n = self.config.ref_keep_top_n
+        if top_n <= 0 or len(tracks) <= top_n:
+            return tracks
+
+        def _size(track: TextTrack) -> int:
+            ref_det = track.detections.get(track.reference_frame_idx)
+            return ref_det.bbox.area() if ref_det is not None else 0
+
+        # Rank by size desc; break ties by original index so the pick
+        # is deterministic.
+        indexed = sorted(
+            enumerate(tracks),
+            key=lambda it: (-_size(it[1]), it[0]),
+        )
+        keep_idxs = {i for i, _ in indexed[:top_n]}
+        kept = [t for i, t in enumerate(tracks) if i in keep_idxs]
+
+        for i, track in enumerate(tracks):
+            if i in keep_idxs:
+                continue
+            logger.info(
+                "S1: dropping track %d ('%s') — reference bbox area "
+                "%d px² outside top %d",
+                track.track_id, track.source_text, _size(track), top_n,
+            )
+
+        logger.info(
+            "S1: top-N filter dropped %d / %d tracks (keeping top %d)",
+            len(tracks) - len(kept), len(tracks), top_n,
+        )
+        return kept
+
+    # -------------------------
     # Optical flow gap filling
     # -------------------------
     def fill_gaps(

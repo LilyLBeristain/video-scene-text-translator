@@ -1,5 +1,6 @@
 """Tests for Stage 5: Revert (De-Frontalization + Compositing)."""
 
+import cv2
 import numpy as np
 import pytest
 
@@ -978,3 +979,246 @@ class TestPreInpaintBackendDispatch:
 
         assert first is second
         assert call_count["n"] == 1
+
+
+class TestSeamlessCenterStability:
+    """Regression guard for seamlessClone center jitter.
+
+    The old fallback ``target_bbox.x + target_bbox.width // 2`` rounds
+    ``x_min`` and ``x_max - x_min`` independently via ``int(round(...))``.
+    Across frames, these two roundings can disagree by ±1 px even when
+    the underlying float quad midpoint barely moves, producing visible
+    seamlessClone seed-pixel jitter. ``_seamless_center_from_corners``
+    rounds the float midpoint exactly once.
+    """
+
+    def test_equal_float_midpoint_yields_equal_center(self):
+        """Two quads with equal float midpoints must share a center.
+
+        ``corners_a`` and ``corners_b`` both have bbox midpoint
+        ``(15.5, 10.5)``; only the distribution of rounding error
+        between x_min/x_max (and y_min/y_max) differs. The int-bbox
+        path would send them to different centers because
+        ``round(x_min)`` and ``round(width)`` disagree between the two.
+        """
+        corners_a = np.array([
+            [10.4, 5.4], [20.6, 5.4], [20.6, 15.6], [10.4, 15.6],
+        ], dtype=np.float64)
+        corners_b = np.array([
+            [10.6, 5.6], [20.4, 5.6], [20.4, 15.4], [10.6, 15.4],
+        ], dtype=np.float64)
+        assert RevertStage._seamless_center_from_corners(corners_a) == \
+            RevertStage._seamless_center_from_corners(corners_b)
+
+    def test_matches_float_midpoint_rounded_once(self):
+        """Output must equal int(round(float_midpoint)) componentwise."""
+        corners = np.array([
+            [100.3, 50.9], [300.7, 50.9], [300.7, 110.1], [100.3, 110.1],
+        ], dtype=np.float64)
+        cx = (100.3 + 300.7) / 2.0
+        cy = (50.9 + 110.1) / 2.0
+        expected = (int(round(cx)), int(round(cy)))
+        assert RevertStage._seamless_center_from_corners(corners) == expected
+
+    def test_beats_int_bbox_on_known_jitter_case(self):
+        """New center is stable where int-bbox center jumps by 1 px.
+
+        Baseline quad at frame N; same quad drifted ~0.4 px in x and
+        ~0.3 px in y between frames N and N+1 (sub-pixel optical flow
+        noise). The int-bbox fallback (``bbox.x + bbox.width // 2``)
+        produces different centers for the two frames; the round-once
+        helper stays within sample-noise sanity.
+        """
+        # Frame N
+        corners_a = np.array([
+            [10.3, 5.3], [20.8, 5.3], [20.8, 15.8], [10.3, 15.8],
+        ], dtype=np.float64)
+        # Frame N+1 (sub-pixel drift)
+        corners_b = np.array([
+            [10.7, 5.6], [21.0, 5.6], [21.0, 16.1], [10.7, 16.1],
+        ], dtype=np.float64)
+
+        def int_bbox_center(corners: np.ndarray) -> tuple[int, int]:
+            """Simulate the pre-fix ``target_bbox.x + bbox.width // 2``."""
+            xs, ys = corners[:, 0], corners[:, 1]
+            x_min = int(round(float(xs.min())))
+            y_min = int(round(float(ys.min())))
+            width = int(round(float(xs.max()) - float(xs.min())))
+            height = int(round(float(ys.max()) - float(ys.min())))
+            return (x_min + width // 2, y_min + height // 2)
+
+        old_a = int_bbox_center(corners_a)
+        old_b = int_bbox_center(corners_b)
+        new_a = RevertStage._seamless_center_from_corners(corners_a)
+        new_b = RevertStage._seamless_center_from_corners(corners_b)
+
+        # The old path jumps by ≥1 px on this input (pins the bug).
+        old_jump = max(abs(old_a[0] - old_b[0]), abs(old_a[1] - old_b[1]))
+        new_jump = max(abs(new_a[0] - new_b[0]), abs(new_a[1] - new_b[1]))
+        assert old_jump >= 1, (
+            "Test input no longer exercises the int-bbox jitter case; "
+            "adjust corners_a / corners_b."
+        )
+        # New path must not jitter more than the underlying float drift.
+        assert new_jump <= old_jump
+
+    def test_run_uses_float_center_when_canonical_size_set(
+        self, default_config,
+    ):
+        """End-to-end: ``run()`` passes a round-once center to seamlessClone.
+
+        Stubs ``composite_roi_into_frame_seamless`` and verifies the
+        ``src_center`` argument matches what ``_seamless_center_from_corners``
+        would compute from the effective frame corners — i.e., the
+        int-bbox fallback path was NOT used.
+        """
+        rng = np.random.default_rng(0)
+        frame = rng.integers(0, 128, (200, 200, 3), dtype=np.uint8)
+        frames = {0: frame}
+
+        # Non-integer quad corners — chosen so the float midpoint and
+        # the int-bbox midpoint disagree.
+        quad = Quad(points=np.array([
+            [10.3, 20.4], [110.7, 20.4], [110.7, 70.6], [10.3, 70.6],
+        ], dtype=np.float32))
+        roi = rng.integers(150, 256, (50, 100, 3), dtype=np.uint8)
+        alpha = np.ones((50, 100), dtype=np.float32)
+        prop = PropagatedROI(
+            frame_idx=0, track_id=0,
+            roi_image=roi, alpha_mask=alpha, target_quad=quad,
+        )
+        det = TextDetection(
+            frame_idx=0,
+            quad=quad,
+            bbox=quad.to_bbox(),
+            text="HELLO",
+            ocr_confidence=0.95,
+            H_from_frontal=np.eye(3),
+            homography_valid=True,
+        )
+        track = TextTrack(
+            track_id=0,
+            source_text="HELLO",
+            target_text="HOLA",
+            source_lang="en",
+            target_lang="es",
+            detections={0: det},
+            reference_frame_idx=0,
+            canonical_size=(100, 50),  # required for the fix path
+        )
+
+        stage = RevertStage(default_config)
+        seen_center: dict[str, tuple[int, int] | None] = {"src_center": None}
+
+        def spy(frame, warped_roi, warped_alpha, target_bbox,
+                src_center=None, flags=None):
+            seen_center["src_center"] = src_center
+            return frame
+
+        stage.composite_roi_into_frame_seamless = spy  # type: ignore[assignment]
+        stage.run(frames, {0: [prop]}, [track])
+
+        # Expected: round-once of canonical_corners projected through
+        # det.H_from_frontal (= I) and delta_H (= None) = canonical_corners.
+        can_corners = np.array(
+            [[0, 0], [100, 0], [100, 50], [0, 50]], dtype=np.float64,
+        )
+        expected = RevertStage._seamless_center_from_corners(can_corners)
+        assert seen_center["src_center"] == expected
+
+
+class TestPreInpaintMaskRasterisation:
+    """Regression guard for the mask-boundary jitter in _pre_inpaint_region.
+
+    The pre-fix path rasterised the expanded quad via
+    ``cv2.fillConvexPoly(mask, expanded.astype(np.int32), 255)`` followed
+    by a 5×5 ``cv2.erode`` and a boolean paste. Two problems:
+
+    1. ``.astype(np.int32)`` quantises each corner to the pixel grid,
+       so a sub-pixel quad drift that crosses an integer boundary
+       flipped the rasterised edge by a full pixel between frames.
+    2. The hard (boolean) paste turned any mismatch between the
+       inpainted and original backgrounds into a visible flickering
+       1-px ring as that edge oscillated.
+
+    The fix shrinks the expanded quad inward by a constant 2 px
+    (replacing the 5×5 erode buffer) and rasterises at ``shift=4,
+    lineType=cv2.LINE_AA`` so the boundary tracks sub-pixel motion
+    proportionally. The grayscale mask is then used as a soft alpha.
+    """
+
+    def test_shrink_moves_corners_toward_centroid_by_exact_px(self):
+        """Each corner ends up ``shrink_px`` closer to the centroid."""
+        corners = np.array([
+            [0, 0], [100, 0], [100, 100], [0, 100],
+        ], dtype=np.float32)
+        shrunk = RevertStage._shrink_quad_to_centroid(corners, shrink_px=5.0)
+        centroid = corners.mean(axis=0)
+        for i in range(4):
+            orig = float(np.linalg.norm(corners[i] - centroid))
+            new = float(np.linalg.norm(shrunk[i] - centroid))
+            assert abs((orig - new) - 5.0) < 1e-4
+
+    def test_shrink_zero_is_identity(self):
+        corners = np.array([
+            [10.5, 20.7], [110.3, 20.7], [110.3, 70.1], [10.5, 70.1],
+        ], dtype=np.float32)
+        shrunk = RevertStage._shrink_quad_to_centroid(corners, shrink_px=0.0)
+        np.testing.assert_allclose(shrunk, corners, atol=1e-4)
+
+    def test_aa_mask_has_soft_boundary(self):
+        """The rasterised mask must contain intermediate values at the edge."""
+        shape = (40, 80)
+        corners = np.array([
+            [10, 10], [50.5, 10], [50.5, 30], [10, 30],
+        ], dtype=np.float32)
+        mask = RevertStage._build_antialiased_mask(corners, shape)
+        assert mask.shape == shape
+        assert mask.dtype == np.uint8
+        unique = np.unique(mask)
+        intermediate = unique[(unique > 0) & (unique < 255)]
+        assert len(intermediate) > 0, (
+            f"AA mask has no gradient values; unique={unique}"
+        )
+
+    def test_aa_mask_reduces_jitter_vs_int32_rasterisation(self):
+        """Sub-pixel drift across a grid line moves AA mask less than hard mask.
+
+        The pre-fix rasterisation truncates corner coords via
+        ``.astype(np.int32)``, so 49.9→49 and 50.1→50 — a 0.2-px
+        drift flips a full column of ~height pixels between the two
+        masks. The AA path spreads the change across a few adjacent
+        columns with small per-pixel deltas. Summed absolute diff
+        must be strictly smaller for AA.
+        """
+        shape = (40, 80)
+        corners_a = np.array([
+            [10, 10], [49.9, 10], [49.9, 30], [10, 30],
+        ], dtype=np.float32)
+        corners_b = np.array([
+            [10, 10], [50.1, 10], [50.1, 30], [10, 30],
+        ], dtype=np.float32)
+
+        # Old hard rasterisation, for comparison.
+        hard_a = np.zeros(shape, dtype=np.uint8)
+        hard_b = np.zeros(shape, dtype=np.uint8)
+        cv2.fillConvexPoly(hard_a, corners_a.astype(np.int32), 255)
+        cv2.fillConvexPoly(hard_b, corners_b.astype(np.int32), 255)
+        hard_diff = int(np.abs(
+            hard_a.astype(np.int32) - hard_b.astype(np.int32)
+        ).sum())
+
+        aa_a = RevertStage._build_antialiased_mask(corners_a, shape)
+        aa_b = RevertStage._build_antialiased_mask(corners_b, shape)
+        aa_diff = int(np.abs(
+            aa_a.astype(np.int32) - aa_b.astype(np.int32)
+        ).sum())
+
+        assert hard_diff > 0, (
+            "Test input no longer exercises the int32-quantisation "
+            "jitter case; adjust corners_a / corners_b."
+        )
+        assert aa_diff < hard_diff, (
+            f"AA mask jitters as much as hard mask: "
+            f"hard_diff={hard_diff}, aa_diff={aa_diff}"
+        )

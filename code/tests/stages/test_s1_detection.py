@@ -449,3 +449,202 @@ class TestPaddleOCRBackend:
         frame = self._make_frame()
         with pytest.raises(ValueError, match="Unknown ocr_backend"):
             detector.detect_text_in_frame(frame, frame_idx=0)
+
+
+def _make_track(
+    track_id: int,
+    ref_frame_idx: int,
+    quad_corners: np.ndarray,
+    source_text: str = "HELLO",
+) -> TextTrack:
+    """Build a minimal TextTrack with a single reference-frame detection."""
+    quad = Quad(points=quad_corners.astype(np.float32))
+    det = TextDetection(
+        frame_idx=ref_frame_idx, quad=quad, bbox=quad.to_bbox(),
+        text=source_text, ocr_confidence=0.9,
+    )
+    return TextTrack(
+        track_id=track_id,
+        source_text=source_text, target_text=f"{source_text}-T",
+        source_lang="en", target_lang="es",
+        detections={ref_frame_idx: det},
+        reference_frame_idx=ref_frame_idx,
+    )
+
+
+class TestFilterTracksByReferenceSize:
+    """``ref_min_bbox_area`` drops tracks whose reference bbox is too small."""
+
+    def test_zero_threshold_is_noop(self, default_config):
+        default_config.detection.ref_min_bbox_area = 0
+        tracker = TextTracker(default_config.detection)
+        tiny = _make_track(
+            0, 0, np.array([[0, 0], [2, 0], [2, 2], [0, 2]]),
+        )
+        assert tracker.filter_tracks_by_reference_size([tiny]) == [tiny]
+
+    def test_drops_tracks_below_threshold(self, default_config):
+        default_config.detection.ref_min_bbox_area = 500
+        tracker = TextTracker(default_config.detection)
+        small = _make_track(  # bbox area = 10 * 10 = 100
+            0, 0, np.array([[0, 0], [10, 0], [10, 10], [0, 10]]),
+            source_text="small",
+        )
+        big = _make_track(  # bbox area = 100 * 50 = 5000
+            1, 0, np.array([[0, 0], [100, 0], [100, 50], [0, 50]]),
+            source_text="big",
+        )
+        result = tracker.filter_tracks_by_reference_size([small, big])
+        assert len(result) == 1
+        assert result[0].track_id == 1
+
+    def test_keeps_tracks_without_reference_frame(self, default_config):
+        """A track whose ref_det is missing should pass through."""
+        default_config.detection.ref_min_bbox_area = 10_000
+        tracker = TextTracker(default_config.detection)
+        track = _make_track(
+            0, 0, np.array([[0, 0], [5, 0], [5, 5], [0, 5]]),
+        )
+        track.reference_frame_idx = -1  # invalidates ref_det lookup
+        assert tracker.filter_tracks_by_reference_size([track]) == [track]
+
+    def test_boundary_at_exact_threshold(self, default_config):
+        """Area == threshold should be kept (strict `<` rejection)."""
+        default_config.detection.ref_min_bbox_area = 100
+        tracker = TextTracker(default_config.detection)
+        # bbox area = 10 * 10 = 100 (exactly the threshold)
+        track = _make_track(
+            0, 0, np.array([[0, 0], [10, 0], [10, 10], [0, 10]]),
+        )
+        assert tracker.filter_tracks_by_reference_size([track]) == [track]
+
+
+class TestFilterTracksByReferenceAspectRatio:
+    """``ref_max_aspect_ratio`` drops overly elongated reference quads."""
+
+    def test_zero_threshold_is_noop(self, default_config):
+        default_config.detection.ref_max_aspect_ratio = 0.0
+        tracker = TextTracker(default_config.detection)
+        # Extremely elongated (50:1) — would be dropped under any >0 threshold.
+        elongated = _make_track(
+            0, 0, np.array([[0, 0], [500, 0], [500, 10], [0, 10]]),
+        )
+        assert tracker.filter_tracks_by_reference_aspect_ratio(
+            [elongated]
+        ) == [elongated]
+
+    def test_drops_too_wide(self, default_config):
+        default_config.detection.ref_max_aspect_ratio = 5.0
+        tracker = TextTracker(default_config.detection)
+        # 10:1 wide quad
+        wide = _make_track(
+            0, 0, np.array([[0, 0], [100, 0], [100, 10], [0, 10]]),
+        )
+        normal = _make_track(  # 4:1
+            1, 0, np.array([[0, 0], [100, 0], [100, 25], [0, 25]]),
+        )
+        result = tracker.filter_tracks_by_reference_aspect_ratio([wide, normal])
+        assert len(result) == 1
+        assert result[0].track_id == 1
+
+    def test_drops_too_tall(self, default_config):
+        """Symmetric: very tall quads should also be dropped."""
+        default_config.detection.ref_max_aspect_ratio = 5.0
+        tracker = TextTracker(default_config.detection)
+        # 1:10 tall quad (width 10, height 100)
+        tall = _make_track(
+            0, 0, np.array([[0, 0], [10, 0], [10, 100], [0, 100]]),
+        )
+        result = tracker.filter_tracks_by_reference_aspect_ratio([tall])
+        assert result == []
+
+    def test_keeps_tracks_without_reference_frame(self, default_config):
+        default_config.detection.ref_max_aspect_ratio = 2.0
+        tracker = TextTracker(default_config.detection)
+        track = _make_track(
+            0, 0, np.array([[0, 0], [100, 0], [100, 10], [0, 10]]),
+        )
+        track.reference_frame_idx = -1
+        assert tracker.filter_tracks_by_reference_aspect_ratio(
+            [track]
+        ) == [track]
+
+    def test_default_five_to_one_is_active_in_default_config(
+        self, default_config,
+    ):
+        """Default aspect ratio is 5.0 — 10:1 quad should be dropped."""
+        assert default_config.detection.ref_max_aspect_ratio == 5.0
+        tracker = TextTracker(default_config.detection)
+        wide = _make_track(
+            0, 0, np.array([[0, 0], [100, 0], [100, 10], [0, 10]]),
+        )
+        assert tracker.filter_tracks_by_reference_aspect_ratio([wide]) == []
+
+
+class TestFilterTracksByTopNSize:
+    """``ref_keep_top_n`` keeps only the N largest tracks by ref bbox area."""
+
+    def _sized_track(self, track_id: int, size: int) -> TextTrack:
+        """Square quad of side ``size`` → bbox area = size²."""
+        return _make_track(
+            track_id, 0,
+            np.array([[0, 0], [size, 0], [size, size], [0, size]]),
+            source_text=f"t{track_id}",
+        )
+
+    def test_zero_is_noop(self, default_config):
+        default_config.detection.ref_keep_top_n = 0
+        tracker = TextTracker(default_config.detection)
+        tracks = [self._sized_track(i, 10 + i) for i in range(5)]
+        assert tracker.filter_tracks_by_top_n_size(tracks) == tracks
+
+    def test_n_greater_than_total_is_noop(self, default_config):
+        default_config.detection.ref_keep_top_n = 10
+        tracker = TextTracker(default_config.detection)
+        tracks = [self._sized_track(i, 10 + i) for i in range(3)]
+        assert tracker.filter_tracks_by_top_n_size(tracks) == tracks
+
+    def test_keeps_n_largest(self, default_config):
+        default_config.detection.ref_keep_top_n = 2
+        tracker = TextTracker(default_config.detection)
+        small = self._sized_track(0, 10)   # area 100
+        medium = self._sized_track(1, 20)  # area 400
+        large = self._sized_track(2, 30)   # area 900
+        result = tracker.filter_tracks_by_top_n_size([small, medium, large])
+        assert len(result) == 2
+        ids = {t.track_id for t in result}
+        assert ids == {1, 2}
+
+    def test_preserves_input_order_among_kept(self, default_config):
+        """Kept tracks should appear in their original input order."""
+        default_config.detection.ref_keep_top_n = 2
+        tracker = TextTracker(default_config.detection)
+        # Largest is track 2 (area 900), second-largest is track 0 (400);
+        # track 1 (100) is dropped. Input order is [t0, t1, t2]; kept
+        # order should therefore be [t0, t2], not [t2, t0].
+        a = self._sized_track(0, 20)  # area 400
+        b = self._sized_track(1, 10)  # area 100
+        c = self._sized_track(2, 30)  # area 900
+        result = tracker.filter_tracks_by_top_n_size([a, b, c])
+        assert [t.track_id for t in result] == [0, 2]
+
+    def test_tracks_without_reference_ranked_last(self, default_config):
+        """Tracks with no ref detection (area=0) lose to any valid track."""
+        default_config.detection.ref_keep_top_n = 1
+        tracker = TextTracker(default_config.detection)
+        no_ref = self._sized_track(0, 10)  # area 100
+        no_ref.reference_frame_idx = -1  # invalidates ref_det lookup
+        valid = self._sized_track(1, 5)   # area 25 — smaller, but has ref
+        result = tracker.filter_tracks_by_top_n_size([no_ref, valid])
+        assert len(result) == 1
+        assert result[0].track_id == 1
+
+    def test_tie_broken_by_input_order(self, default_config):
+        """Equal-size tracks resolve ties in favour of earlier input index."""
+        default_config.detection.ref_keep_top_n = 1
+        tracker = TextTracker(default_config.detection)
+        first = self._sized_track(0, 20)   # area 400
+        second = self._sized_track(1, 20)  # area 400 (tie)
+        result = tracker.filter_tracks_by_top_n_size([first, second])
+        assert len(result) == 1
+        assert result[0].track_id == 0

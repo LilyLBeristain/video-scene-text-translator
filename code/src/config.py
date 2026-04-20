@@ -65,6 +65,25 @@ class DetectionConfig:
     # Set to 0 to disable. 0.5 = drop if 50%+ of the new track's area
     # is covered by an existing track.
     duplicate_track_coverage_threshold: float = 0.5
+    # Reference-frame size filter. Drop tracks whose reference-frame
+    # axis-aligned bbox area (in px²) is below this threshold. Very
+    # small detections warp to a canonical ROI too small for legible
+    # editing. 0 disables the filter.
+    ref_min_bbox_area: float = 0.0
+    # Reference-frame aspect-ratio filter. Drop tracks whose reference
+    # quad has ``max(w/h, h/w) > ref_max_aspect_ratio`` (based on
+    # average edge lengths). Catches spurious OCR joins that span an
+    # entire headline or smear into wide horizontal strips. Set to 0
+    # or a negative value to disable. Default 5.0.
+    ref_max_aspect_ratio: float = 5.0
+    # Reference-frame top-N cap. After the size/aspect filters, keep
+    # only the N tracks with the largest reference bbox area. Useful
+    # when many tracks survive the hard filters but quality / compute
+    # budget limits how many can actually be edited per video. 0
+    # disables. Tracks without a valid reference detection are treated
+    # as area 0 and ranked last, so they only survive if fewer than N
+    # valid tracks exist.
+    ref_keep_top_n: int = 0
     # S1 quad smoothing filters applied during gap-filling. These operate
     # on the raw optical-flow quads before S2 frontalization. Stacking
     # multiple filters introduces positional lag — disable if S5 temporal
