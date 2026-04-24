@@ -2,6 +2,11 @@
 
 CMPT 743 Visual Computing Lab II final project (SFU). Replace scene text in video frames across languages, preserving font style, perspective, and lighting consistency.
 
+## Authors
+- Hebin Yao  
+- Yunshan Feng  
+- Liliana L. Beristain 
+
 ## Environment Setup
 
 ### Prerequisites
